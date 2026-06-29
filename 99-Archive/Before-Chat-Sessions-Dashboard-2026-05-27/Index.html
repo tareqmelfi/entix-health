@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>T-OS Health</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+
+    <main class="app-shell">
+      <aside class="desktop-sidebar" aria-label="Workspace navigation">
+        <div class="brand-block">
+          <div class="brand-name">Clinical Clarity</div>
+          <div class="brand-meta">T-PER Health</div>
+        </div>
+
+        <button class="primary-action" type="button" id="newConsultation">استشارة جديدة</button>
+
+        <nav class="nav-stack">
+          <button class="nav-item active" type="button" data-view="consultation">الاستشارات</button>
+          <button class="nav-item" type="button" data-view="files">ملفات المريض</button>
+          <button class="nav-item" type="button" data-view="memory">الذاكرة</button>
+          <button class="nav-item admin-only hidden" type="button" data-view="admin">لوحة التحكم</button>
+        </nav>
+
+        <div class="sidebar-bottom">
+          <button class="nav-item" type="button" data-view="settings">الإعدادات</button>
+          <div class="profile-chip">
+            <div class="avatar">T</div>
+            <div>
+              <div class="profile-name" id="profileName">غير مسجل</div>
+              <div class="profile-sub" id="profileSub">Private workspace</div>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <section class="mobile-head">
+        <div>
+          <div class="mobile-title">Clinical Clarity</div>
+          <div class="mobile-subtitle">T-PER Health</div>
+        </div>
+        <button class="ghost-button" type="button" id="mobileDebugToggle">تفاصيل</button>
+      </section>
+
+      <section class="main-stage">
+        <header class="status-strip">
+          <div class="soft-image" aria-hidden="true"></div>
+          <div>
+            <div class="status-title">مسارك الصحي الخاص</div>
+            <div class="status-copy" id="statusText">جاري التحقق من الجلسة...</div>
+          </div>
+          <div class="status-pill" id="statusPill">checking</div>
+        </header>
+
+        <section class="login-view" id="loginPanel">
+          <div class="login-card">
+            <h1>تسجيل الدخول</h1>
+            <p>ادخل بحساب Google المصرح أو استخدم كود الدخول الاحتياطي.</p>
+            <a class="google-button disabled" id="googleLogin" href="/api/auth/google">تسجيل الدخول عبر Google</a>
+            <div class="oauth-note" id="oauthNote"></div>
+            <form id="loginForm" class="access-form">
+              <input id="accessCode" type="password" autocomplete="current-password" placeholder="كود الدخول الاحتياطي" />
+              <button type="submit">دخول</button>
+            </form>
+            <div class="form-note" id="loginMessage"></div>
+          </div>
+        </section>
+
+        <section class="workspace-grid hidden" id="appPanel">
+          <section class="consultation-view" id="consultationView">
+            <div class="thread" id="messages"></div>
+            <form class="composer desktop-composer" id="chatForm">
+              <button class="icon-button" type="button" id="composerAttach" title="رفع ملف">+</button>
+              <textarea id="question" rows="1" placeholder="اكتب رسالة..." dir="rtl"></textarea>
+              <button class="icon-button send" type="submit" title="إرسال">↑</button>
+            </form>
+          </section>
+
+          <aside class="right-drawer" id="rightDrawer">
+            <section class="drawer-panel">
+              <div class="panel-title">رفع ملف</div>
+              <p>PDF أو صورة أو ملف نصي. التخزين خاص داخل HMDB.</p>
+              <form id="uploadForm" class="upload-box">
+                <input id="fileInput" type="file" accept=".pdf,.png,.jpg,.jpeg,.txt,.md,.csv" />
+                <button type="submit">حفظ في الذاكرة</button>
+              </form>
+              <div class="form-note" id="uploadMessage"></div>
+            </section>
+
+            <section class="drawer-panel">
+              <div class="panel-title">الملفات الأخيرة</div>
+              <div class="documents" id="documents"></div>
+            </section>
+
+            <section class="drawer-panel admin-panel hidden" id="adminPanel">
+              <div class="panel-title">لوحة التحكم</div>
+              <form id="addUserForm" class="admin-form">
+                <input id="newUserEmail" type="email" placeholder="email@domain.com" dir="ltr" />
+                <select id="newUserRole">
+                  <option value="member">member</option>
+                  <option value="admin">admin</option>
+                </select>
+                <button type="submit">إضافة</button>
+              </form>
+              <div class="users-list" id="usersList"></div>
+            </section>
+
+            <section class="drawer-panel debug-panel hidden" id="debugPanel">
+              <div class="panel-title">Debug</div>
+              <pre id="debugBox">{}</pre>
+            </section>
+          </aside>
+        </section>
+      </section>
+
+      <form class="composer mobile-composer hidden" id="mobileChatForm">
+        <button class="icon-button" type="button" id="mobileAttach" title="رفع ملف">+</button>
+        <textarea id="mobileQuestion" rows="1" placeholder="اكتب رسالة..." dir="rtl"></textarea>
+        <button class="icon-button send" type="submit" title="إرسال">↑</button>
+      </form>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Private Health</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="sidebar" aria-label="Conversations">
+        <section class="profile-top">
+          <div class="profile-avatar" aria-hidden="true">T</div>
+          <div class="profile-copy">
+            <div class="profile-name" id="profileName">Private</div>
+            <div class="profile-sub" id="profileSub">Health memory</div>
+          </div>
+        </section>
+
+        <section class="sidebar-actions">
+          <button class="action-button" type="button" id="newChatButton">محادثة جديدة</button>
+          <label class="search-box">
+            <span>بحث</span>
+            <input id="conversationSearch" type="search" placeholder="ابحث في المحادثات" />
+          </label>
+        </section>
+
+        <section class="conversation-section">
+          <div class="section-label">المثبتة</div>
+          <div class="conversation-list pinned-list" id="pinnedConversations"></div>
+          <div class="section-label">المحادثات</div>
+          <div class="conversation-list" id="conversationList"></div>
+        </section>
+
+        <section class="sidebar-bottom">
+          <button class="rail-button active" type="button" data-view="chat">الشات</button>
+          <button class="rail-button" type="button" data-view="dashboard">الداشبورد</button>
+          <button class="rail-button" type="button" data-view="settings">الإعدادات</button>
+          <button class="rail-button admin-only hidden" type="button" data-view="admin">الأدمن</button>
+        </section>
+      </aside>
+
+      <section class="mobile-bar">
+        <div class="profile-avatar small" aria-hidden="true">T</div>
+        <div class="mobile-title">ملفي الصحي</div>
+        <button class="mobile-new" type="button" id="mobileNewChatButton">+</button>
+      </section>
+
+      <section class="main-stage">
+        <section class="login-view" id="loginPanel">
+          <div class="login-card">
+            <h1>دخول خاص</h1>
+            <p>ادخل بحساب Google المصرح، أو استخدم كود الدخول الاحتياطي إلى أن يتم تفعيل OAuth.</p>
+            <a class="google-button disabled" id="googleLogin" href="/api/auth/google">تسجيل الدخول عبر Google</a>
+            <div class="oauth-note" id="oauthNote"></div>
+            <form id="loginForm" class="access-form">
+              <input id="accessCode" type="password" autocomplete="current-password" placeholder="كود الدخول" />
+              <button type="submit">دخول</button>
+            </form>
+            <div class="form-note" id="loginMessage"></div>
+          </div>
+        </section>
+
+        <section class="workspace hidden" id="appPanel">
+          <header class="workspace-head">
+            <div>
+              <div class="view-title" id="viewTitle">المحادثة</div>
+              <div class="view-subtitle" id="statusText">جاري التحقق من الربط...</div>
+            </div>
+            <div class="head-actions">
+              <button class="ghost-button" type="button" id="pinCurrentButton">تثبيت</button>
+              <button class="ghost-button" type="button" id="uploadReportsButton">رفع التقارير والملفات</button>
+              <span class="status-pill" id="statusPill">checking</span>
+            </div>
+          </header>
+
+          <section class="view-pane active" id="chatView">
+            <div class="chat-drop-overlay hidden" id="chatDropOverlay">
+              <div class="chat-drop-card">
+                <span class="chat-drop-icon" aria-hidden="true">+</span>
+                <span class="chat-drop-title">اسحب التقرير هنا</span>
+                <span class="chat-drop-subtitle">PDF، صور، أو ملفات نصية. راح تنحفظ في الذاكرة وتظهر داخل الشات.</span>
+              </div>
+            </div>
+            <div class="thread" id="messages"></div>
+            <form class="composer" id="chatForm">
+              <button class="icon-button" type="button" id="composerAttach" title="رفع تقرير">+</button>
+              <textarea id="question" rows="1" placeholder="اكتب سؤال..." dir="rtl"></textarea>
+              <button class="icon-button send" type="submit" title="إرسال">↑</button>
+            </form>
+          </section>
+
+          <section class="view-pane dashboard-view" id="dashboardView">
+            <div class="dashboard-grid">
+              <article class="metric-card">
+                <div class="metric-value" id="reportsCount">0</div>
+                <div class="metric-label">تقارير محفوظة</div>
+              </article>
+              <article class="metric-card">
+                <div class="metric-value" id="documentsCount">0</div>
+                <div class="metric-label">ملفات</div>
+              </article>
+              <article class="metric-card">
+                <div class="metric-value" id="memoryCount">0</div>
+                <div class="metric-label">تحديثات ذاكرة</div>
+              </article>
+            </div>
+
+            <div class="dashboard-columns">
+              <section class="panel">
+                <div class="panel-title">التقارير والتغييرات</div>
+                <div class="report-list" id="reportList"></div>
+              </section>
+              <section class="panel">
+                <div class="panel-title">الملفات الأخيرة</div>
+                <div class="documents" id="documents"></div>
+              </section>
+            </div>
+          </section>
+
+          <section class="view-pane settings-view" id="settingsView">
+            <section class="panel">
+              <div class="panel-title">رفع التقارير والملفات</div>
+              <p>ارفع ملف واحد أو مجموعة ملفات: PDF متعدد الصفحات، صور، Markdown، نصوص، CSV، أو أي ملف تقرير غير تنفيذي. النسخ واللصق داخل الشات ينحفظ كذلك.</p>
+              <form id="uploadForm" class="upload-box">
+                <input id="fileInput" class="file-input-hidden" type="file" multiple />
+                <button id="filePickerButton" class="file-picker-card" type="button">
+                  <span class="file-picker-icon" aria-hidden="true">+</span>
+                  <span class="file-picker-copy">
+                    <span class="file-picker-title">اختيار أو إسقاط ملفات</span>
+                    <span class="file-picker-subtitle">PDF، صور، CSV، Markdown، نصوص، أو نسخ ولصق داخل الشات.</span>
+                  </span>
+                </button>
+                <div class="selected-files-head">
+                  <span id="filePickerSummary">ما فيه ملفات مختارة.</span>
+                  <button id="clearSelectedFiles" class="text-button" type="button" disabled>مسح الاختيار</button>
+                </div>
+                <div class="selected-files empty" id="selectedFilesList">اختر ملفات، وراح تظهر هنا قبل الحفظ.</div>
+                <button class="upload-submit" type="submit">حفظ في الذاكرة</button>
+              </form>
+              <div class="form-note" id="uploadMessage"></div>
+              <div class="saved-files-panel">
+                <div class="panel-title small">الملفات المحفوظة</div>
+                <div class="documents settings-documents" id="settingsDocuments"></div>
+              </div>
+            </section>
+
+            <section class="panel debug-panel hidden" id="debugPanel">
+              <div class="panel-title">Debug</div>
+              <pre id="debugBox">{}</pre>
+            </section>
+          </section>
+
+          <section class="view-pane admin-view" id="adminView">
+            <section class="panel admin-panel hidden" id="adminPanel">
+              <div class="panel-title">إدارة المستخدمين</div>
+              <form id="addUserForm" class="admin-form">
+                <input id="newUserEmail" type="email" placeholder="email@domain.com" dir="ltr" />
+                <select id="newUserRole">
+                  <option value="member">member</option>
+                  <option value="admin">admin</option>
+                </select>
+                <button type="submit">إضافة</button>
+              </form>
+              <div class="users-list" id="usersList"></div>
+            </section>
+          </section>
+        </section>
+      </section>
+
+      <nav class="mobile-tabs" id="mobileTabs">
+        <button class="rail-button active" type="button" data-view="chat">الشات</button>
+        <button class="rail-button" type="button" data-view="dashboard">الداشبورد</button>
+        <button class="rail-button" type="button" data-view="settings">الإعدادات</button>
+      </nav>
+
+      <section class="document-preview hidden" id="documentPreviewModal" aria-hidden="true">
+        <div class="preview-backdrop" id="previewBackdrop"></div>
+        <article class="preview-panel" role="dialog" aria-modal="true" aria-label="استعراض الملف">
+          <header class="preview-head">
+            <div>
+              <div class="preview-title" id="previewTitle">استعراض الملف</div>
+              <div class="preview-subtitle" id="previewSubtitle">ملف محفوظ في الذاكرة</div>
+            </div>
+            <button class="preview-close" id="previewClose" type="button">إغلاق</button>
+          </header>
+          <div class="preview-body" id="previewBody"></div>
+        </article>
+      </section>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>T-OS Health</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">T</div>
+          <div>
+            <div class="brand-title">T-OS Health</div>
+            <div class="brand-subtitle">private · tareq</div>
+          </div>
+        </div>
+        <nav class="nav">
+          <button class="nav-item active" type="button">Chat</button>
+          <button class="nav-item" type="button">Files</button>
+          <button class="nav-item" type="button">Memory</button>
+          <button class="nav-item" type="button">System</button>
+        </nav>
+        <div class="sidebar-foot">
+          <div class="mini-label">Scope</div>
+          <div class="mini-value">T-PER-PRJ-HEALTH</div>
+        </div>
+      </aside>
+
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <h1>Personal health workspace</h1>
+            <p>General chat, private file storage, and HMDB memory status.</p>
+          </div>
+          <div class="status-row" id="statusRow">
+            <span class="status-dot pending"></span>
+            <span>checking</span>
+          </div>
+        </header>
+
+        <section class="login-panel" id="loginPanel">
+          <div class="login-card">
+            <h2>Access required</h2>
+            <p>Enter the private T-OS Health access code.</p>
+            <form id="loginForm">
+              <input id="accessCode" type="password" autocomplete="current-password" placeholder="Access code" />
+              <button type="submit">Unlock</button>
+            </form>
+            <div class="form-note" id="loginMessage"></div>
+          </div>
+        </section>
+
+        <section class="app-grid hidden" id="appPanel">
+          <section class="chat-panel">
+            <div class="panel-head">
+              <div>
+                <h2>General chat</h2>
+                <p>Use general questions only until HMDB ingestion is fully verified.</p>
+              </div>
+            </div>
+            <div class="messages" id="messages"></div>
+            <form class="chat-form" id="chatForm">
+              <textarea id="question" rows="3" placeholder="Ask a general system or health-prep question..."></textarea>
+              <button type="submit">Send</button>
+            </form>
+          </section>
+
+          <aside class="right-rail">
+            <section class="upload-panel">
+              <div class="panel-head compact">
+                <h2>Upload file</h2>
+                <p>PDF, image, text, CSV · stored in private HMDB volume.</p>
+              </div>
+              <form id="uploadForm" class="upload-box">
+                <input id="fileInput" type="file" accept=".pdf,.png,.jpg,.jpeg,.txt,.md,.csv" />
+                <button type="submit">Store file</button>
+              </form>
+              <div class="form-note" id="uploadMessage"></div>
+            </section>
+
+            <section class="documents-panel">
+              <div class="panel-head compact">
+                <h2>Recent files</h2>
+              </div>
+              <div class="documents" id="documents"></div>
+            </section>
+          </aside>
+        </section>
+      </section>
+    </main>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

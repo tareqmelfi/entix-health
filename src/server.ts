@@ -1,0 +1,3300 @@
+import crypto from "node:crypto";
+import { execFile } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
+import Fastify from "fastify";
+import cookie from "@fastify/cookie";
+import cors from "@fastify/cors";
+import helmet from "@fastify/helmet";
+import multipart from "@fastify/multipart";
+import rateLimit from "@fastify/rate-limit";
+import fastifyStatic from "@fastify/static";
+import type { FastifyReply, FastifyRequest } from "fastify";
+import { z } from "zod";
+import { checkDb, getDbIdentity, getPersonBySlug, pool, withPerson } from "./db.js";
+import { adminEmails, config, googleOAuthEnabled, googleRedirectUri, providerStatus } from "./config.js";
+import { runCouncil, runDirect, councilEnabled, visionExtractLabs, type LabExtraction } from "./council.js";
+import { runMigrations } from "./migrate.js";
+import {
+  clearGoogleState,
+  clearSession,
+  readGoogleState,
+  requireAdmin,
+  requireHmdbSecret,
+  requireSession,
+  requestIp,
+  setGoogleState,
+  setSession,
+  timingSafeStringEqual
+} from "./security.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const publicDir = path.resolve(__dirname, "../public");
+const execFileAsync = promisify(execFile);
+
+type CommitteeResult = {
+  ok: boolean;
+  request_id: string;
+  final_answer: string;
+  validator_status: {
+    status: "pass" | "blocked" | "caution";
+    blocked: boolean;
+    hits: Array<{ code: string; severity: string; message: string }>;
+  };
+  models_used: string[];
+  memory_delta: Record<string, unknown>;
+  debug?: Record<string, unknown>;
+};
+
+function normalizeEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
+const LOCAL_PASSWORD_METADATA_KEY = "local_password";
+
+function publicRedirect(search = "", hash = "") {
+  const url = new URL("/", config.PUBLIC_BASE_URL);
+  if (search) url.search = search;
+  if (hash) url.hash = hash;
+  return url.toString();
+}
+
+function hashLocalPassword(password: string, salt = crypto.randomBytes(16).toString("base64url")) {
+  const iterations = 210_000;
+  const hash = crypto.pbkdf2Sync(password, salt, iterations, 32, "sha256").toString("base64url");
+  return { algorithm: "pbkdf2-sha256", iterations, salt, hash };
+}
+
+function verifyLocalPassword(password: string, metadata: any) {
+  const record = metadata?.[LOCAL_PASSWORD_METADATA_KEY];
+  if (!record || record.algorithm !== "pbkdf2-sha256" || !record.salt || !record.hash) return false;
+  const expected = Buffer.from(record.hash, "base64url");
+  const actual = Buffer.from(
+    crypto.pbkdf2Sync(password, record.salt, Number(record.iterations || 210_000), expected.length, "sha256").toString("base64url"),
+    "base64url"
+  );
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+}
+
+function hasLocalPassword(metadata: any) {
+  const record = metadata?.[LOCAL_PASSWORD_METADATA_KEY];
+  return Boolean(record?.salt && record?.hash);
+}
+
+function redactUserRow(row: any) {
+  if (!row) return row;
+  const metadata = { ...(row.metadata || {}) };
+  delete metadata[LOCAL_PASSWORD_METADATA_KEY];
+  return { ...row, metadata };
+}
+
+function currentSession(request: any) {
+  return request.session as { slug: string; email: string; role: "admin" | "member"; status: string } | undefined;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const N8N_CHAT_TIMEOUT_MS = 6500;
+const N8N_DOCUMENT_INGEST_TIMEOUT_MS = 3500;
+
+function n8nIntegrationSnapshot() {
+  const healthCommitteeWebhookConfigured = Boolean(config.N8N_HEALTH_COMMITTEE_WEBHOOK);
+  const documentIngestWebhookConfigured = Boolean(config.N8N_DOCUMENT_INGEST_WEBHOOK);
+  const generalChatWebhookConfigured = Boolean(config.N8N_GENERAL_CHAT_WEBHOOK);
+
+  return {
+    integration: "n8n",
+    ok: healthCommitteeWebhookConfigured && documentIngestWebhookConfigured,
+    mode: healthCommitteeWebhookConfigured
+      ? "health_committee_webhook_configured"
+      : "local_deterministic_fallback_only",
+    workflow: config.N8N_HEALTH_COMMITTEE_WORKFLOW_NAME,
+    configured: {
+      health_committee_webhook: healthCommitteeWebhookConfigured,
+      document_ingest_webhook: documentIngestWebhookConfigured,
+      general_chat_webhook: generalChatWebhookConfigured,
+      health_committee_secret: Boolean(config.N8N_HEALTH_COMMITTEE_SECRET)
+    },
+    expected_env: {
+      health_committee_webhook: "N8N_HEALTH_COMMITTEE_WEBHOOK",
+      document_ingest_webhook: "N8N_DOCUMENT_INGEST_WEBHOOK",
+      general_chat_webhook: "N8N_GENERAL_CHAT_WEBHOOK",
+      health_committee_secret: "N8N_HEALTH_COMMITTEE_SECRET"
+    },
+    timeout_ms: {
+      health_committee: N8N_CHAT_TIMEOUT_MS,
+      document_ingest: N8N_DOCUMENT_INGEST_TIMEOUT_MS
+    }
+  };
+}
+
+const REPORT_KEYWORDS = [
+  "cbc",
+  "lab",
+  "blood",
+  "vitamin",
+  "ferritin",
+  "iron",
+  "tsh",
+  "ft4",
+  "hba1c",
+  "glucose",
+  "cholesterol",
+  "alt",
+  "ast",
+  "creatinine",
+  "تحليل",
+  "تحاليل",
+  "فيتامين",
+  "مخزون",
+  "حديد",
+  "سكر",
+  "كوليسترول",
+  "كرياتينين",
+  "الغدة"
+];
+
+function chatTitleFromMessage(message: string) {
+  const compact = message.replace(/\s+/g, " ").trim();
+  if (!compact) return "محادثة صحية جديدة";
+  return compact.length > 58 ? `${compact.slice(0, 58)}...` : compact;
+}
+
+function reportTitleFromText(text: string) {
+  const lower = text.toLowerCase();
+  if (lower.includes("ferritin") || text.includes("مخزون")) return "تقرير مخزون الحديد";
+  if (lower.includes("vitamin d") || text.includes("فيتامين د")) return "تقرير فيتامين د";
+  if (lower.includes("thyroid") || lower.includes("tsh") || text.includes("الغدة")) return "تقرير الغدة";
+  return "تقرير صحي من المحادثة";
+}
+
+function looksLikeReportText(text: string) {
+  const lower = text.toLowerCase();
+  const keywordHits = REPORT_KEYWORDS.filter((keyword) => lower.includes(keyword.toLowerCase())).length;
+  return text.length >= 700 || keywordHits >= 2 || /(?:\d+(?:\.\d+)?)\s*(?:mg\/dl|ng\/ml|mmol\/l|iu\/l|u\/l|µg|ug|pg\/ml)/i.test(text);
+}
+
+function reportSummary(text: string) {
+  const compact = text.replace(/\s+/g, " ").trim();
+  if (!compact) return "Report captured for structured review.";
+  return compact.length > 360 ? `${compact.slice(0, 360)}...` : compact;
+}
+
+type LabMarkerInput = {
+  marker_name: string;
+  value_text?: string;
+  value_numeric?: number;
+  unit?: string;
+  reference_range?: string;
+  flag?: "low" | "normal" | "high" | "critical" | "out_of_range";
+  interpretation?: string;
+};
+
+type HealthSnapshot = {
+  stats: {
+    documents: number;
+    reports: number;
+    lab_markers: number;
+    pending_ocr: number;
+    medications: number;
+    supplements: number;
+    conditions: number;
+  };
+  recent_documents: any[];
+  recent_reports: any[];
+  lab_markers: any[];
+  lab_trends: any[];
+  medications: any[];
+  supplements: any[];
+  conditions: any[];
+  health_signals?: HealthSignal[];
+  risk_alerts?: RiskAlert[];
+  protocol_snapshot?: ProtocolSnapshot;
+  next_actions?: NextAction[];
+};
+
+type HealthSignalStatus = "good" | "watch" | "alert" | "pending" | "needs_review";
+
+type HealthSignal = {
+  key: string;
+  label: string;
+  domain: string;
+  marker_names: string[];
+  latest_value: unknown;
+  latest_numeric: number | null;
+  previous_value: unknown;
+  previous_numeric: number | null;
+  delta: number | null;
+  direction: "up" | "down" | "flat";
+  unit: string | null;
+  reference_range: string | null;
+  latest_date: string | null;
+  previous_date: string | null;
+  samples: number;
+  status: HealthSignalStatus;
+  status_label: string;
+  summary: string;
+  sparkline: Array<{ date: string | null; value: number | null; flag: string | null }>;
+};
+
+type RiskAlert = {
+  code: string;
+  severity: "info" | "watch" | "alert";
+  title: string;
+  detail: string;
+  source: string;
+};
+
+type ProtocolSnapshot = {
+  generated_at: string;
+  medications: any[];
+  supplements: any[];
+  conditions: any[];
+  red_lines: any[];
+  schedule: Array<{ slot: string; label: string; items: string[]; notes: string }>;
+  interactions: Array<{ code: string; severity: string; title: string; body: string }>;
+  print_sections: Array<{ title: string; body: string[] }>;
+};
+
+type NextAction = {
+  title: string;
+  detail: string;
+  priority: "high" | "medium" | "low";
+};
+
+const CLINICAL_SAFE_MODE_MESSAGE =
+  "The Clinical Intelligence Engine is currently running in local safe mode. Please contact the entix.health Team.";
+
+function resultCount(result: { rowCount: number | null; rows: unknown[] }) {
+  return result.rowCount ?? result.rows.length;
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function emptyDashboardResponse(warnings: string[] = []) {
+  return {
+    ok: true,
+    stats: {
+      reports: 0,
+      documents: 0,
+      recent_memory_events: 0,
+      conversations: 0,
+      lab_panels: 0,
+      lab_markers: 0,
+      medications: 0,
+      supplements: 0,
+      conditions: 0
+    },
+    reports: [],
+    documents: [],
+    memory_events: [],
+    conversations: [],
+    lab_panels: [],
+    lab_markers: [],
+    lab_trends: [],
+    health_signals: [],
+    risk_alerts: [],
+    protocol_snapshot: {},
+    next_actions: [],
+    latest_report: null,
+    medications: [],
+    supplements: [],
+    conditions: [],
+    red_lines: [],
+    warnings
+  };
+}
+
+const LAB_MARKER_DEFINITIONS = [
+  { name: "Ferritin", aliases: ["Ferritin", "مخزون الحديد"] },
+  { name: "Iron", aliases: ["Iron", "Serum Iron", "الحديد"] },
+  { name: "Hemoglobin A1C", aliases: ["Hemoglobin A1C", "HbA1c", "HBA1C", "السكر التراكمي"] },
+  { name: "Average Blood Glucose", aliases: ["Average Blood Glucose", "ABG", "متوسط السكر"] },
+  { name: "Fasting Glucose", aliases: ["Glucose - Fasting", "Fasting Glucose", "سكر الصائم", "سكر صائم"] },
+  { name: "Vitamin D", aliases: ["Vitamin D", "25 OH Vitamin D", "فيتامين د"] },
+  { name: "Vitamin B12", aliases: ["Vitamin B12", "B12", "فيتامين ب12", "فيتامين ب 12"] },
+  { name: "TSH", aliases: ["TSH", "Thyroid Stimulating Hormone"] },
+  { name: "Free T4", aliases: ["Free T4", "FT4"] },
+  { name: "HDL Cholesterol", aliases: ["HDL", "High Density Lipoprotein", "الكوليسترول النافع"] },
+  { name: "LDL Cholesterol", aliases: ["LDL", "Low Density Lipoprotein", "الكوليسترول الضار"] },
+  { name: "Triglycerides", aliases: ["Triglycerides", "TG", "الدهون الثلاثية"] },
+  { name: "Total Cholesterol", aliases: ["Total Cholesterol", "Cholesterol", "الكوليسترول الكلي"] },
+  { name: "Creatinine", aliases: ["Creatinine", "Creatinine - Serum", "الكرياتينين"] },
+  { name: "BUN", aliases: ["Blood Urea Nitrogen", "BUN", "يوريا الدم"] },
+  { name: "BUN/Creatinine Ratio", aliases: ["BUN/Creatinine Ratio", "BUN Creatinine Ratio"] },
+  { name: "Uric Acid", aliases: ["Uric Acid", "حمض اليوريك"] },
+  { name: "ALT", aliases: ["ALT", "Alanine Aminotransferase"] },
+  { name: "AST", aliases: ["AST", "Aspartate Aminotransferase"] },
+  { name: "Platelets", aliases: ["Platelets", "PLT", "الصفائح"] },
+  { name: "MCHC", aliases: ["MCHC"] },
+  { name: "Basophils", aliases: ["Basophils", "الخلايا القاعدية"] }
+];
+
+const HEALTH_SIGNAL_DEFINITIONS = [
+  {
+    key: "ferritin",
+    label: "مخزون الحديد",
+    domain: "Iron",
+    markerNames: ["Ferritin"],
+    low: 30,
+    target: "يفضل متابعة الارتفاع التدريجي وربطه بالأعراض."
+  },
+  {
+    key: "glucose",
+    label: "سكر الصائم",
+    domain: "Metabolic",
+    markerNames: ["Fasting Glucose", "Average Blood Glucose", "Hemoglobin A1C"],
+    low: 74,
+    high: 106,
+    target: "الهدف ثبات الطاقة وتقليل هبوط السكر المفاجئ."
+  },
+  {
+    key: "vitamin_d",
+    label: "فيتامين د",
+    domain: "Vitamins",
+    markerNames: ["Vitamin D"],
+    low: 30,
+    target: "تابع التحسن مع الجرعة اليومية."
+  },
+  {
+    key: "thyroid",
+    label: "الغدة",
+    domain: "Thyroid",
+    markerNames: ["TSH", "Free T4"],
+    target: "الأهم ثبات القراءة مع الالتزام بفصل Levothyroxine عن المعادن."
+  },
+  {
+    key: "lipids",
+    label: "الدهون والكوليسترول",
+    domain: "Lipids",
+    markerNames: ["HDL Cholesterol", "LDL Cholesterol", "Triglycerides", "Total Cholesterol"],
+    target: "راقب HDL/LDL مع الأوميجا والنشاط."
+  },
+  {
+    key: "kidney_liver",
+    label: "الكلى والكبد",
+    domain: "Safety",
+    markerNames: ["Creatinine", "BUN", "BUN/Creatinine Ratio", "Uric Acid", "ALT", "AST"],
+    target: "مؤشرات أمان عامة للأدوية والمكملات."
+  },
+  {
+    key: "blood_count",
+    label: "الدم والصفائح",
+    domain: "CBC",
+    markerNames: ["Platelets", "MCHC", "Basophils"],
+    target: "تتأثر أحياناً بنقص الحديد وتحتاج متابعة اتجاهية."
+  }
+];
+
+const LAB_UNIT_RE = "(?:mg\\/dL|mg\\/dl|ng\\/mL|ng\\/ml|mmol\\/L|mmol\\/l|uIU\\/mL|mIU\\/L|IU\\/L|U\\/L|µg\\/L|ug\\/L|pg\\/mL|g\\/dL|10\\^3\\/uL|x10\\^3\\/uL|Ratio|%)";
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function snakeKey(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function normalizeNumber(value: string | undefined) {
+  if (!value) return undefined;
+  const normalized = value.replace(/[<>,]/g, "").trim();
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function detectFlag(windowText: string): LabMarkerInput["flag"] | undefined {
+  const lower = windowText.toLowerCase();
+  if (/(critical|panic|حرج|خطير)/i.test(windowText)) return "critical";
+  if (/(high|مرتفع|elevated|above|h\b)/i.test(windowText)) return "high";
+  if (/(low|منخفض|below|l\b)/i.test(windowText)) return "low";
+  if (/(normal|طبيعي|within range|داخل النطاق)/i.test(windowText)) return "normal";
+  if (/(out of range|خارج النطاق)/i.test(windowText)) return "out_of_range";
+  if (lower.includes("prediabetes") || lower.includes("pre diabetes")) return "out_of_range";
+  return undefined;
+}
+
+function extractReferenceRange(windowText: string) {
+  const range = windowText.match(/(?:reference range|range|المعدل|النطاق|الطبيعي)\s*:?\s*([<>≤≥]?\s*\d+(?:\.\d+)?\s*(?:-|–|to|الى|إلى)\s*[<>≤≥]?\s*\d+(?:\.\d+)?|[<>≤≥]\s*\d+(?:\.\d+)?)/i);
+  return range?.[1]?.replace(/\s+/g, " ").trim();
+}
+
+function extractDateCandidate(text: string) {
+  const iso = text.match(/\b(20\d{2})[-/](\d{1,2})[-/](\d{1,2})\b/);
+  if (iso) {
+    const [, year, month, day] = iso;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+  const dmy = text.match(/\b(\d{1,2})[-/](\d{1,2})[-/](20\d{2})\b/);
+  if (dmy) {
+    const [, day, month, year] = dmy;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+  return null;
+}
+
+function guessLabName(text: string) {
+  if (/one\s*touch/i.test(text) || text.includes("مختبرات لمسة واحدة")) return "One Touch Medical Laboratories";
+  if (/sulaiman|habib/i.test(text)) return "Sulaiman Al Habib";
+  if (/lab/i.test(text) || text.includes("مختبر")) return "Health laboratory";
+  return null;
+}
+
+function markerWindow(normalized: string, aliases: string[]) {
+  for (const alias of aliases) {
+    const re = new RegExp(escapeRegex(alias), "i");
+    const match = normalized.match(re);
+    if (!match || match.index === undefined) continue;
+    const start = Math.max(0, match.index - 48);
+    const end = Math.min(normalized.length, match.index + alias.length + 260);
+    return normalized.slice(start, end);
+  }
+  return "";
+}
+
+function extractMarkerValue(windowText: string) {
+  const latest = windowText.match(new RegExp(`(?:الجديد|new|result|reported|النتيجة|value)[^0-9<≤≥-]{0,40}([<≤≥>]?[\\s-]*\\d+(?:\\.\\d+)?)\\s*(${LAB_UNIT_RE})?`, "i"));
+  if (latest?.[1]) return { text: `${latest[1].replace(/\s+/g, "")}${latest[2] ? ` ${latest[2]}` : ""}`.trim(), numeric: normalizeNumber(latest[1]), unit: latest[2] };
+
+  const valueMatches = Array.from(windowText.matchAll(new RegExp(`([<≤≥>]?[\\s-]*\\d+(?:\\.\\d+)?)\\s*(${LAB_UNIT_RE})?`, "gi")))
+    .filter((match) => {
+      const before = windowText.slice(Math.max(0, (match.index || 0) - 12), match.index || 0).toLowerCase();
+      return !/(date|reported|registered|collected|received|page|age|reservation|requested|completed|pending|تاريخ|صفحة)/i.test(before);
+    })
+    .slice(0, 6);
+
+  const withUnit = valueMatches.find((match) => match[2]) || valueMatches[0];
+  if (!withUnit?.[1]) return null;
+  return { text: `${withUnit[1].replace(/\s+/g, "")}${withUnit[2] ? ` ${withUnit[2]}` : ""}`.trim(), numeric: normalizeNumber(withUnit[1]), unit: withUnit[2] };
+}
+
+function extractLabMarkers(text: string): LabMarkerInput[] {
+  const normalized = text.replace(/\u00a0/g, " ").replace(/\s+/g, " ");
+  const markers = new Map<string, LabMarkerInput>();
+  for (const definition of LAB_MARKER_DEFINITIONS) {
+    const windowText = markerWindow(normalized, definition.aliases);
+    if (!windowText) continue;
+    const value = extractMarkerValue(windowText);
+    if (!value) continue;
+    markers.set(definition.name, {
+      marker_name: definition.name,
+      value_text: value.text,
+      value_numeric: value.numeric,
+      unit: value.unit,
+      reference_range: extractReferenceRange(windowText),
+      flag: detectFlag(windowText),
+      interpretation: "Extracted by local parser from uploaded private health report. Verify against the original report before clinical use."
+    });
+  }
+  return Array.from(markers.values());
+}
+
+function extractReportMetrics(text: string) {
+  const metrics: Record<string, Record<string, unknown>> = {};
+  for (const marker of extractLabMarkers(text)) {
+    metrics[snakeKey(marker.marker_name)] = {
+      value: marker.value_numeric ?? marker.value_text,
+      value_text: marker.value_text,
+      unit: marker.unit || null,
+      flag: marker.flag || null,
+      reference_range: marker.reference_range || null
+    };
+  }
+  return metrics;
+}
+
+const BLOCKED_UPLOAD_EXTENSIONS = new Set([
+  ".app",
+  ".apk",
+  ".bat",
+  ".bin",
+  ".cmd",
+  ".com",
+  ".deb",
+  ".dmg",
+  ".exe",
+  ".ipa",
+  ".jar",
+  ".msi",
+  ".pkg",
+  ".ps1",
+  ".rpm",
+  ".run",
+  ".scr",
+  ".sh",
+  ".zsh"
+]);
+
+const TEXT_UPLOAD_EXTENSIONS = new Set([".txt", ".md", ".csv", ".json", ".tsv", ".xml", ".yaml", ".yml"]);
+const OCR_UPLOAD_EXTENSIONS = new Set([".pdf", ".png", ".jpg", ".jpeg", ".webp", ".heic", ".heif", ".tif", ".tiff"]);
+const OCR_LANGUAGE = "eng+ara";
+
+function uploadExtension(filename: string) {
+  const ext = path.extname(filename || "").toLowerCase();
+  if (!ext) return ".dat";
+  if (ext.length > 16 || BLOCKED_UPLOAD_EXTENSIONS.has(ext)) {
+    const error = new Error("unsupported_file_type");
+    (error as any).statusCode = 400;
+    throw error;
+  }
+  return ext;
+}
+
+function documentTypeForUpload(ext: string, mimetype?: string) {
+  if (ext === ".pdf") return "lab_pdf";
+  if (TEXT_UPLOAD_EXTENSIONS.has(ext)) return "text_report";
+  if (mimetype?.startsWith("image/") || [".png", ".jpg", ".jpeg", ".webp", ".heic", ".heif", ".tif", ".tiff"].includes(ext)) return "image_report";
+  return "uploaded_file";
+}
+
+function previewMimeForPath(filePath: string, documentType?: string) {
+  const ext = path.extname(filePath || "").toLowerCase();
+  if (ext === ".pdf" || documentType === "lab_pdf") return "application/pdf";
+  if ([".png"].includes(ext)) return "image/png";
+  if ([".jpg", ".jpeg"].includes(ext)) return "image/jpeg";
+  if ([".webp"].includes(ext)) return "image/webp";
+  if ([".heic", ".heif"].includes(ext)) return "image/heic";
+  if ([".txt", ".md", ".csv", ".tsv", ".json", ".xml", ".yaml", ".yml"].includes(ext) || documentType === "text_report") return "text/plain; charset=utf-8";
+  return "application/octet-stream";
+}
+
+function inlineFilename(title: string) {
+  return (title || "health-file").replace(/[\r\n\"]/g, " ").slice(0, 160);
+}
+
+function shouldRunOcr(ext: string, mimetype?: string) {
+  return OCR_UPLOAD_EXTENSIONS.has(ext) || Boolean(mimetype?.startsWith("image/"));
+}
+
+async function runTesseract(imagePath: string) {
+  const { stdout } = await execFileAsync("tesseract", [imagePath, "stdout", "-l", OCR_LANGUAGE, "--psm", "6"], {
+    timeout: 120_000,
+    maxBuffer: 8 * 1024 * 1024
+  });
+  return stdout.trim();
+}
+
+async function runLocalOcr(filePath: string, ext: string, documentId: string) {
+  if (ext === ".pdf") {
+    const workDir = path.join(path.dirname(filePath), "ocr-work", documentId);
+    await fs.promises.mkdir(workDir, { recursive: true, mode: 0o700 });
+    const prefix = path.join(workDir, "page");
+    try {
+      await execFileAsync("pdftoppm", ["-png", "-r", "220", filePath, prefix], {
+        timeout: 180_000,
+        maxBuffer: 4 * 1024 * 1024
+      });
+      const pages = (await fs.promises.readdir(workDir))
+        .filter((name) => name.startsWith("page-") && name.endsWith(".png"))
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      const chunks: string[] = [];
+      for (let index = 0; index < pages.length; index += 1) {
+        const text = await runTesseract(path.join(workDir, pages[index]));
+        if (text) chunks.push(`--- Page ${index + 1} ---\n${text}`);
+      }
+      return chunks.join("\n\n").slice(0, 200_000);
+    } finally {
+      await fs.promises.rm(workDir, { recursive: true, force: true });
+    }
+  }
+  return (await runTesseract(filePath)).slice(0, 200_000);
+}
+
+async function upsertLabPanelFromText(
+  client: any,
+  person: any,
+  sourceDocumentId: string | null,
+  title: string,
+  text: string,
+  createdBy?: string
+) {
+  const markers = extractLabMarkers(text);
+  if (!markers.length) return null;
+
+  const panelDate = extractDateCandidate(text);
+  const labName = guessLabName(text);
+  const summary = [
+    `Structured lab extraction saved from ${title || "health report"}.`,
+    `Markers extracted: ${markers.map((marker) => marker.marker_name).join(", ")}.`
+  ].join(" ");
+
+  let panel: any;
+  if (sourceDocumentId) {
+    const existing = await client.query(
+      `select id, panel_date, lab_name, summary, created_at
+       from lab_panels
+       where person_id = $1 and source_document_id = $2
+       order by created_at desc
+       limit 1`,
+      [person.id, sourceDocumentId]
+    );
+    if (existing.rows[0]) {
+      const updated = await client.query(
+        `update lab_panels
+         set panel_date = coalesce($3::date, panel_date),
+             lab_name = coalesce($4, lab_name),
+             summary = $5
+         where id = $1 and person_id = $2
+         returning id, panel_date, lab_name, summary, created_at`,
+        [existing.rows[0].id, person.id, panelDate || null, labName, summary]
+      );
+      panel = updated.rows[0];
+      await client.query("delete from lab_markers where lab_panel_id = $1 and person_id = $2", [panel.id, person.id]);
+    }
+  }
+
+  if (!panel) {
+    const inserted = await client.query(
+      `insert into lab_panels (person_id, panel_date, lab_name, source_document_id, summary, created_by)
+       values ($1, $2, $3, $4, $5, $6)
+       returning id, panel_date, lab_name, summary, created_at`,
+      [person.id, panelDate || null, labName, sourceDocumentId || null, summary, createdBy || "local-parser"]
+    );
+    panel = inserted.rows[0];
+  }
+
+  for (const marker of markers) {
+    await client.query(
+      `insert into lab_markers (lab_panel_id, person_id, marker_name, value_text, value_numeric, unit, reference_range, flag, interpretation, created_by)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [
+        panel.id,
+        person.id,
+        marker.marker_name,
+        marker.value_text || null,
+        marker.value_numeric ?? null,
+        marker.unit || null,
+        marker.reference_range || null,
+        marker.flag || null,
+        marker.interpretation || null,
+        createdBy || "local-parser"
+      ]
+    );
+  }
+
+  return { lab_panel: panel, markers_saved: markers.length, markers };
+}
+
+// Render an uploaded file to base64 images for the vision model (PDF → pages).
+async function renderToImages(filePath: string, ext: string, mimetype?: string): Promise<Array<{ b64: string; media: string }>> {
+  if (ext === ".pdf") {
+    const workDir = path.join(path.dirname(filePath), "vis-work", crypto.randomUUID());
+    await fs.promises.mkdir(workDir, { recursive: true, mode: 0o700 });
+    const prefix = path.join(workDir, "page");
+    try {
+      await execFileAsync("pdftoppm", ["-png", "-r", "160", "-l", "6", filePath, prefix], { timeout: 120_000, maxBuffer: 8 * 1024 * 1024 });
+      const pages = (await fs.promises.readdir(workDir))
+        .filter((n) => n.endsWith(".png"))
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      const out: Array<{ b64: string; media: string }> = [];
+      for (const p of pages.slice(0, 6)) {
+        const buf = await fs.promises.readFile(path.join(workDir, p));
+        out.push({ b64: buf.toString("base64"), media: "image/png" });
+      }
+      return out;
+    } finally {
+      await fs.promises.rm(workDir, { recursive: true, force: true });
+    }
+  }
+  const buf = await fs.promises.readFile(filePath);
+  let media = mimetype && mimetype.startsWith("image/") ? mimetype : ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" : ext === ".webp" ? "image/webp" : ext === ".gif" ? "image/gif" : "image/png";
+  if (!["image/png", "image/jpeg", "image/webp", "image/gif"].includes(media)) media = "image/png";
+  return [{ b64: buf.toString("base64"), media }];
+}
+
+async function extractLabsWithVision(filePath: string, ext: string, mimetype?: string): Promise<LabExtraction | null> {
+  try {
+    const images = await renderToImages(filePath, ext, mimetype);
+    if (!images.length) return null;
+    const result = await visionExtractLabs(images, { model: config.EXTRACTION_MODEL });
+    return result.markers.length ? result : result;
+  } catch (error) {
+    app.log.warn({ err: error }, "vision_extract_failed");
+    return null;
+  }
+}
+
+// Save structured markers coming from the vision extractor.
+async function upsertLabPanelFromMarkers(client: any, person: any, sourceDocumentId: string | null, title: string, extraction: LabExtraction, createdBy?: string) {
+  const markers = extraction.markers || [];
+  if (!markers.length) return null;
+  const summary = `Vision extraction (${extraction.model}) from ${title || "health report"}. Markers: ${markers.map((m) => m.marker_name).join(", ")}.`;
+  let panel: any;
+  if (sourceDocumentId) {
+    const existing = await client.query(
+      `select id from lab_panels where person_id = $1 and source_document_id = $2 order by created_at desc limit 1`,
+      [person.id, sourceDocumentId]
+    );
+    if (existing.rows[0]) {
+      const updated = await client.query(
+        `update lab_panels set panel_date = coalesce($3::date, panel_date), lab_name = coalesce($4, lab_name), summary = $5 where id = $1 and person_id = $2 returning id`,
+        [existing.rows[0].id, person.id, extraction.panel_date || null, extraction.lab_name, summary]
+      );
+      panel = updated.rows[0];
+      await client.query("delete from lab_markers where lab_panel_id = $1 and person_id = $2", [panel.id, person.id]);
+    }
+  }
+  if (!panel) {
+    const inserted = await client.query(
+      `insert into lab_panels (person_id, panel_date, lab_name, source_document_id, summary, created_by) values ($1, $2, $3, $4, $5, $6) returning id`,
+      [person.id, extraction.panel_date || null, extraction.lab_name, sourceDocumentId || null, summary, createdBy || "vision-extractor"]
+    );
+    panel = inserted.rows[0];
+  }
+  for (const m of markers) {
+    await client.query(
+      `insert into lab_markers (lab_panel_id, person_id, marker_name, value_text, value_numeric, unit, reference_range, flag, interpretation, created_by)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [panel.id, person.id, m.marker_name, m.value_text || null, m.value_numeric ?? null, m.unit || null, m.reference_range || null, m.flag || null, m.explain || null, createdBy || "vision-extractor"]
+    );
+  }
+  return { lab_panel: panel, markers_saved: markers.length, markers };
+}
+
+// Heuristic: does the message ask for a diagnosis / lab analysis (→ convene council)?
+const DIAGNOSTIC_PATTERNS =
+  /(شخّ|تشخيص|حلّ?ل|تحالي|نتيج|نتائج|رأيك|رايك|هل عندي|نقص|ارتفاع|مرتفع|منخفض|انخفاض|خطر|جرعة|دواء|أعراض|اعراض|فسّ?ر|تفسير|مجلس|استشر|استشار|قارن|diagnos|analy|interpret|result|risk|dose|deficien|symptom|panel|\blab\b)/i;
+function isDiagnosticIntent(message: string) {
+  return DIAGNOSTIC_PATTERNS.test(message || "");
+}
+
+async function backfillStructuredLabMarkers(client: any, person: any) {
+  const candidates = await client.query(
+    `select d.id, d.title, d.extracted_text, d.created_by, r.id as report_snapshot_id
+     from documents d
+     left join lab_panels p on p.source_document_id = d.id and p.person_id = d.person_id
+     left join report_snapshots r on r.document_id = d.id and r.person_id = d.person_id
+     where d.person_id = $1
+       and p.id is null
+       and d.extracted_text is not null
+       and length(d.extracted_text) > 40
+       and coalesce(d.metadata->>'qa_hidden', 'false') <> 'true'
+     order by d.created_at desc
+     limit 20`,
+    [person.id]
+  );
+  let markersSaved = 0;
+  for (const row of candidates.rows) {
+    const result = await upsertLabPanelFromText(client, person, row.id, row.title, row.extracted_text, row.created_by || "local-parser-backfill");
+    if (!result) continue;
+    markersSaved += result.markers_saved;
+    if (row.report_snapshot_id) {
+      await client.query(
+        `update report_snapshots
+         set status = 'classified',
+             metrics = $3,
+             trend = coalesce(trend, '{}'::jsonb) || $4::jsonb
+         where id = $1 and person_id = $2`,
+        [
+          row.report_snapshot_id,
+          person.id,
+          extractReportMetrics(row.extracted_text),
+          {
+            structured_markers_saved: result.markers_saved,
+            lab_panel_id: result.lab_panel.id,
+            parser_backfill: true
+          }
+        ]
+      );
+    }
+  }
+  return markersSaved;
+}
+
+async function markDocumentOcrStatus(personSlug: string, documentId: string, reportSnapshotId: string | undefined, status: Record<string, unknown>, extractedText?: string) {
+  await withPerson(personSlug, async (client, person) => {
+    const ocrMetadata = { ocr: status };
+    await client.query(
+      `update documents
+       set extracted_text = coalesce($3::text, extracted_text),
+           summary = case
+             when $3::text is not null and length($3::text) > 0 then $4
+             else summary
+           end,
+           metadata = coalesce(metadata, '{}'::jsonb) || $5::jsonb
+       where id = $1 and person_id = $2`,
+      [
+        documentId,
+        person.id,
+        extractedText || null,
+        extractedText ? `OCR text captured locally. ${extractedText.length} characters extracted. Structured lab extraction is pending.` : null,
+        ocrMetadata
+      ]
+    );
+    const labPanelResult = extractedText
+      ? await upsertLabPanelFromText(client, person, documentId, "OCR health report", extractedText, "ocr-local")
+      : null;
+    if (reportSnapshotId) {
+      await client.query(
+        `update report_snapshots
+         set summary = case
+               when $3::text is not null and length($3::text) > 0 then $4
+               else summary
+             end,
+             metrics = case
+               when $3::text is not null and length($3::text) > 0 then $5
+               else metrics
+             end,
+             trend = coalesce(trend, '{}'::jsonb) || $6::jsonb,
+             status = case
+               when $7 = 'completed' then 'classified'
+               else status
+             end
+         where id = $1 and person_id = $2`,
+        [
+          reportSnapshotId,
+          person.id,
+          extractedText || null,
+          extractedText ? reportSummary(extractedText) : null,
+          extractedText ? extractReportMetrics(extractedText) : {},
+          {
+            ocr_status: status.status,
+            ocr: status,
+            structured_markers_saved: labPanelResult?.markers_saved || 0,
+            lab_panel_id: labPanelResult?.lab_panel?.id || null
+          },
+          status.status
+        ]
+      );
+    }
+  });
+}
+
+function queueLocalOcrJob(params: {
+  personSlug: string;
+  documentId: string;
+  reportSnapshotId?: string;
+  filePath: string;
+  ext: string;
+}) {
+  void (async () => {
+    try {
+      await markDocumentOcrStatus(params.personSlug, params.documentId, params.reportSnapshotId, {
+        status: "processing",
+        engine: "tesseract-local",
+        language: OCR_LANGUAGE,
+        started_at: new Date().toISOString()
+      });
+      const text = await runLocalOcr(params.filePath, params.ext, params.documentId);
+      await markDocumentOcrStatus(
+        params.personSlug,
+        params.documentId,
+        params.reportSnapshotId,
+        {
+          status: text ? "completed" : "empty",
+          engine: "tesseract-local",
+          language: OCR_LANGUAGE,
+          characters: text.length,
+          completed_at: new Date().toISOString()
+        },
+        text || undefined
+      );
+    } catch (error) {
+      try {
+        await markDocumentOcrStatus(params.personSlug, params.documentId, params.reportSnapshotId, {
+          status: "failed",
+          engine: "tesseract-local",
+          language: OCR_LANGUAGE,
+          error: error instanceof Error ? error.message.slice(0, 240) : "ocr_failed",
+          completed_at: new Date().toISOString()
+        });
+      } catch {
+        // OCR must never crash the API process.
+      }
+    }
+  })();
+}
+
+async function ensureChatSession(personSlug: string, requestedId: string | undefined, titleSeed: string, createdBy: string | undefined) {
+  return withPerson(personSlug, async (client, person) => {
+    if (requestedId && UUID_RE.test(requestedId)) {
+      const existing = await client.query(
+        `select id, title, pinned, status, summary, last_message_at, created_at, updated_at
+         from chat_sessions
+         where id = $1 and person_id = $2 and status = 'active'
+         limit 1`,
+        [requestedId, person.id]
+      );
+      if (existing.rows[0]) return existing.rows[0];
+    }
+
+    const result = await client.query(
+      `insert into chat_sessions (person_id, title, created_by, metadata)
+       values ($1, $2, $3, $4)
+       returning id, title, pinned, status, summary, last_message_at, created_at, updated_at`,
+      [person.id, chatTitleFromMessage(titleSeed), createdBy || null, { source: "clinical-clarity-ui" }]
+    );
+    return result.rows[0];
+  });
+}
+
+async function saveChatMessage(personSlug: string, sessionId: string, role: "user" | "assistant" | "system", body: string, metadata: Record<string, unknown>) {
+  return withPerson(personSlug, async (client, person) => {
+    const result = await client.query(
+      `insert into chat_messages (session_id, person_id, role, body, metadata)
+       values ($1, $2, $3, $4, $5)
+       returning id, role, body, metadata, created_at`,
+      [sessionId, person.id, role, body, metadata]
+    );
+    await client.query(
+      `update chat_sessions
+       set last_message_at = now(),
+           summary = case when $3 = 'assistant' then left($4, 500) else coalesce(summary, left($4, 500)) end
+       where id = $1 and person_id = $2`,
+      [sessionId, person.id, role, body]
+    );
+    return result.rows[0];
+  });
+}
+
+async function maybeSavePastedReport(personSlug: string, sessionId: string, text: string, createdBy: string | undefined) {
+  if (!looksLikeReportText(text)) return null;
+  return withPerson(personSlug, async (client, person) => {
+    const fileHash = crypto.createHash("sha256").update(text).digest("hex");
+    const existing = await client.query(
+      `select id, title, created_at
+       from documents
+       where person_id = $1 and file_hash = $2
+       limit 1`,
+      [person.id, fileHash]
+    );
+
+    const document =
+      existing.rows[0] ??
+      (
+        await client.query(
+          `insert into documents (person_id, document_type, title, file_hash, extracted_text, summary, created_by, metadata)
+           values ($1, 'pasted_report', $2, $3, $4, $5, 'clinical-clarity-ui', $6)
+           returning id, title, document_type, file_hash, summary, created_at`,
+          [
+            person.id,
+            reportTitleFromText(text),
+            fileHash,
+            text.slice(0, 200_000),
+            reportSummary(text),
+            { session_id: sessionId, created_by_email: createdBy || null, source_type: "pasted_text" }
+          ]
+        )
+      ).rows[0];
+
+    const snapshot = await client.query(
+      `insert into report_snapshots (person_id, document_id, session_id, source_type, report_kind, title, summary, metrics, trend, status, created_by)
+       values ($1, $2, $3, 'pasted_text', 'lab_or_health_report', $4, $5, $6, $7, 'parser_pending', $8)
+       returning id, title, source_type, status, created_at`,
+      [
+        person.id,
+        document.id,
+        sessionId,
+        document.title || reportTitleFromText(text),
+        reportSummary(text),
+        extractReportMetrics(text),
+        { baseline: "pending", change_signal: "awaiting_structured_parser" },
+        createdBy || null
+      ]
+    );
+
+    await client.query(
+      `insert into memory_events (person_id, source, event_type, event_title, event_body, importance, session_id, raw_delta)
+       values ($1, 'clinical-clarity-ui', 'report_pasted', $2, $3, 4, $4, $5)`,
+      [
+        person.id,
+        document.title,
+        "Pasted health report captured as private HMDB document.",
+        sessionId,
+        { document_id: document.id, report_snapshot_id: snapshot.rows[0].id }
+      ]
+    );
+
+    const labPanelResult = await upsertLabPanelFromText(client, person, document.id, document.title, text, createdBy || "clinical-clarity-ui");
+    if (labPanelResult) {
+      await client.query(
+        `update report_snapshots
+         set status = 'classified',
+             trend = coalesce(trend, '{}'::jsonb) || $3::jsonb
+         where id = $1 and person_id = $2`,
+        [
+          snapshot.rows[0].id,
+          person.id,
+          {
+            structured_markers_saved: labPanelResult.markers_saved,
+            lab_panel_id: labPanelResult.lab_panel.id
+          }
+        ]
+      );
+    }
+
+    return {
+      document,
+      report_snapshot: {
+        ...snapshot.rows[0],
+        status: labPanelResult ? "classified" : snapshot.rows[0].status,
+        structured_markers_saved: labPanelResult?.markers_saved || 0,
+        lab_panel_id: labPanelResult?.lab_panel?.id || null
+      }
+    };
+  });
+}
+
+function googleLoginUrl() {
+  return "/api/auth/google";
+}
+
+async function ensureAdminUser(email = "tareq@fc.sa") {
+  const normalizedEmail = normalizeEmail(email);
+  await pool
+    .query(
+      `insert into health_memory.app_users (email, person_slug, role, status, created_by, metadata)
+       values ($1, 'tareq', 'admin', 'active', 'system', '{"seed":"admin","source":"admin_google_emails"}'::jsonb)
+       on conflict (email) do update
+       set role = 'admin',
+           status = 'active',
+           person_slug = 'tareq',
+           metadata = app_users.metadata || excluded.metadata,
+           updated_at = now()`,
+      [normalizedEmail]
+    )
+    .catch((error: unknown) => app.log.warn({ err: error }, "admin_user_seed_skipped"));
+}
+
+async function ensureConfiguredAdminUsers() {
+  for (const email of adminEmails) {
+    await ensureAdminUser(email);
+  }
+}
+
+async function ensureAboTalalUser() {
+  // Disabled unless explicitly enabled via env. No credential literals in source.
+  if (config.SEED_LOCAL_LOGIN !== "true") return;
+  const email = config.SEED_LOCAL_EMAIL;
+  if (!email || !config.SEED_LOCAL_SALT || !config.SEED_LOCAL_HASH) return;
+  const passwordRecord = {
+    algorithm: "pbkdf2-sha256",
+    iterations: 210_000,
+    salt: config.SEED_LOCAL_SALT,
+    hash: config.SEED_LOCAL_HASH
+  };
+  await pool
+    .query(
+      `insert into health_memory.persons (slug, display_label, relation_label, privacy_level, status, consent_recorded, metadata)
+       values ('abo-talal', 'Abo Talal', 'father', 'private', 'active', false, '{"seed":"local-private-profile"}'::jsonb)
+       on conflict (slug) do update
+       set status = 'active', updated_at = now()`
+    )
+    .catch((error: unknown) => app.log.warn({ err: error }, "abo_talal_person_seed_skipped"));
+
+  await pool
+    .query(
+      `insert into health_memory.app_users (email, person_slug, role, status, created_by, metadata)
+       values ($1, 'abo-talal', 'member', 'active', 'system', $2::jsonb)
+       on conflict (email) do update
+       set person_slug = 'abo-talal',
+           role = 'member',
+           status = 'active',
+           metadata = case
+             when app_users.metadata ? $3 then app_users.metadata
+             else app_users.metadata || excluded.metadata
+           end,
+           updated_at = now()`,
+      [email, JSON.stringify({ seed: "abo-talal-local-login", [LOCAL_PASSWORD_METADATA_KEY]: passwordRecord }), LOCAL_PASSWORD_METADATA_KEY]
+    )
+    .catch((error: unknown) => app.log.warn({ err: error }, "abo_talal_user_seed_skipped"));
+}
+
+async function findAppUserByEmail(email: string) {
+  const result = await pool.query(
+    `select id, email, person_slug, role, status, created_at, updated_at, last_login_at, metadata
+     from health_memory.app_users
+     where email = $1
+     limit 1`,
+    [normalizeEmail(email)]
+  );
+  return result.rows[0] ?? null;
+}
+
+async function activateOAuthUser(email: string, profile: Record<string, unknown>, source = "google-oauth") {
+  const normalized = normalizeEmail(email);
+  const result = await pool.query(
+    `insert into health_memory.app_users (email, person_slug, role, status, created_by, metadata)
+     values ($1, 'tareq', 'member', 'active', $3, $2::jsonb)
+     on conflict (email) do update
+     set person_slug = coalesce(app_users.person_slug, excluded.person_slug),
+         role = case when app_users.role = 'admin' then app_users.role else excluded.role end,
+         status = case when app_users.status = 'suspended' then app_users.status else 'active' end,
+         metadata = app_users.metadata || excluded.metadata,
+         updated_at = now()
+     returning id, email, person_slug, role, status, created_at, updated_at, last_login_at, metadata`,
+    [normalized, JSON.stringify({ ...profile, source }), source]
+  );
+  return result.rows[0];
+}
+
+async function upsertActiveEmailUser(email: string, password: string) {
+  const normalized = normalizeEmail(email);
+  const existing = await findAppUserByEmail(normalized);
+  if (existing?.status === "active") return { user: existing, alreadyActive: true, suspended: false };
+  if (existing?.status === "suspended") return { user: existing, alreadyActive: false, suspended: true };
+
+  const metadata = {
+    source: "email-password",
+    registered_at: new Date().toISOString(),
+    [LOCAL_PASSWORD_METADATA_KEY]: hashLocalPassword(password)
+  };
+  const result = await pool.query(
+    `insert into health_memory.app_users (email, person_slug, role, status, created_by, metadata)
+     values ($1, 'tareq', 'member', 'active', 'email-signup', $2::jsonb)
+     on conflict (email) do update
+     set person_slug = coalesce(app_users.person_slug, excluded.person_slug),
+         role = case when app_users.role = 'admin' then app_users.role else excluded.role end,
+         status = case when app_users.status = 'suspended' then app_users.status else 'active' end,
+         metadata = app_users.metadata || excluded.metadata,
+         updated_at = now()
+     returning id, email, person_slug, role, status, created_at, updated_at, last_login_at, metadata`,
+    [normalized, JSON.stringify(metadata)]
+  );
+  return { user: result.rows[0], alreadyActive: false, suspended: false };
+}
+
+async function touchUserLogin(email: string) {
+  await pool.query("update health_memory.app_users set last_login_at = now(), updated_at = now() where email = $1", [
+    normalizeEmail(email)
+  ]);
+}
+
+function numericValue(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value.replace(/[<>,]/g, "").trim());
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function rowDate(row: any) {
+  return row?.panel_date || row?.created_at || null;
+}
+
+function sortMarkersNewest(rows: any[]) {
+  return rows.sort((a, b) => {
+    const left = new Date(rowDate(a) || 0).getTime();
+    const right = new Date(rowDate(b) || 0).getTime();
+    return right - left;
+  });
+}
+
+function markerNameMatches(markerName: string, expectedNames: string[]) {
+  const normalized = markerName.toLowerCase();
+  return expectedNames.some((expected) => {
+    const target = expected.toLowerCase();
+    return normalized === target || normalized.includes(target) || target.includes(normalized);
+  });
+}
+
+function statusLabel(status: HealthSignalStatus) {
+  if (status === "good") return "مطمئن";
+  if (status === "watch") return "راقب";
+  if (status === "alert") return "يحتاج انتباه";
+  if (status === "needs_review") return "يحتاج مراجعة";
+  return "بانتظار قراءة";
+}
+
+function assessSignal(definition: any, latest: any, latestNumeric: number | null): HealthSignalStatus {
+  if (!latest) return "pending";
+  const flag = String(latest.flag || "").toLowerCase();
+  if (flag === "critical") return "alert";
+  if (["high", "low", "out_of_range"].includes(flag)) return "watch";
+  if (latestNumeric === null) return "needs_review";
+  if (typeof definition.low === "number" && latestNumeric < definition.low) return "watch";
+  if (typeof definition.high === "number" && latestNumeric > definition.high) return "watch";
+  return "good";
+}
+
+function signalSummary(definition: any, latest: any, previous: any, delta: number | null, status: HealthSignalStatus) {
+  if (!latest) return "ارفع تقريراً مخبرياً لبدء المتابعة الاتجاهية.";
+  const markerName = latest.marker_name || definition.label;
+  const trend =
+    delta === null
+      ? "هذه أول قراءة منظمة لهذا المؤشر."
+      : delta > 0
+        ? `ارتفع عن القراءة السابقة بمقدار ${delta}${latest.unit ? ` ${latest.unit}` : ""}.`
+        : delta < 0
+          ? `انخفض عن القراءة السابقة بمقدار ${Math.abs(delta)}${latest.unit ? ` ${latest.unit}` : ""}.`
+          : "ثابت مقارنة بالقراءة السابقة.";
+  const review = status === "watch" || status === "alert" ? "يحتاج متابعة وربطه بالأعراض والسياق." : "الاتجاه الحالي لا يظهر تنبيهاً حاداً.";
+  return `${markerName}: ${trend} ${review} ${definition.target || ""}`.trim();
+}
+
+function buildHealthSignals(markers: any[]): HealthSignal[] {
+  return HEALTH_SIGNAL_DEFINITIONS.map((definition) => {
+    const rows = sortMarkersNewest(
+      markers.filter((marker) => markerNameMatches(String(marker.marker_name || ""), definition.markerNames))
+    );
+    const latest = rows[0] || null;
+    const previous = rows[1] || null;
+    const latestNumeric = numericValue(latest?.value_numeric);
+    const previousNumeric = numericValue(previous?.value_numeric);
+    const delta = latestNumeric !== null && previousNumeric !== null ? Number((latestNumeric - previousNumeric).toFixed(2)) : null;
+    const direction = delta === null ? "flat" : delta > 0 ? "up" : delta < 0 ? "down" : "flat";
+    const status = assessSignal(definition, latest, latestNumeric);
+    return {
+      key: definition.key,
+      label: definition.label,
+      domain: definition.domain,
+      marker_names: definition.markerNames,
+      latest_value: latest?.value_text || latest?.value_numeric || null,
+      latest_numeric: latestNumeric,
+      previous_value: previous?.value_text || previous?.value_numeric || null,
+      previous_numeric: previousNumeric,
+      delta,
+      direction,
+      unit: latest?.unit || previous?.unit || null,
+      reference_range: latest?.reference_range || null,
+      latest_date: rowDate(latest),
+      previous_date: rowDate(previous),
+      samples: rows.length,
+      status,
+      status_label: statusLabel(status),
+      summary: signalSummary(definition, latest, previous, delta, status),
+      sparkline: rows
+        .slice(0, 8)
+        .reverse()
+        .map((row) => ({ date: rowDate(row), value: numericValue(row.value_numeric), flag: row.flag || null }))
+    };
+  });
+}
+
+function buildLabTrends(markers: any[]) {
+  const grouped = new Map<string, any[]>();
+  for (const marker of markers) {
+    const key = String(marker.marker_name || "").toLowerCase();
+    if (!key) continue;
+    const rows = grouped.get(key) || [];
+    rows.push(marker);
+    grouped.set(key, rows);
+  }
+  return Array.from(grouped.values()).map((rows) => {
+    const sorted = sortMarkersNewest(rows);
+    const latest = sorted[0];
+    const previous = sorted[1] || null;
+    const latestValue = numericValue(latest?.value_numeric);
+    const previousValue = numericValue(previous?.value_numeric);
+    const delta = latestValue !== null && previousValue !== null ? Number((latestValue - previousValue).toFixed(2)) : null;
+    return {
+      marker_name: latest.marker_name,
+      latest_value: latest.value_text || latest.value_numeric,
+      latest_numeric: latestValue,
+      previous_value: previous?.value_text || previous?.value_numeric || null,
+      previous_numeric: previousValue,
+      delta,
+      unit: latest.unit || previous?.unit || null,
+      flag: latest.flag || null,
+      latest_date: rowDate(latest),
+      previous_date: rowDate(previous),
+      samples: sorted.length,
+      direction: delta === null ? "flat" : delta > 0 ? "up" : delta < 0 ? "down" : "flat"
+    };
+  });
+}
+
+function buildRiskAlerts(signals: HealthSignal[], redLines: any[], pendingOcr: number): RiskAlert[] {
+  const alerts: RiskAlert[] = [];
+  for (const signal of signals) {
+    if (signal.status === "alert" || signal.status === "watch") {
+      alerts.push({
+        code: `SIGNAL-${signal.key.toUpperCase()}`,
+        severity: signal.status === "alert" ? "alert" : "watch",
+        title: signal.label,
+        detail: signal.summary,
+        source: "lab_markers"
+      });
+    }
+  }
+  if (pendingOcr > 0) {
+    alerts.push({
+      code: "OCR-PENDING",
+      severity: "info",
+      title: "ملفات قيد القراءة",
+      detail: `${pendingOcr} ملف محفوظ وينتظر OCR أو التحليل البنيوي. لا تعتمد عليه كمؤشر نهائي حتى يكتمل.`,
+      source: "documents"
+    });
+  }
+  for (const rule of redLines.slice(0, 5)) {
+    if (!/ASHWAGANDHA|PDE5|THYROID|STIMULANT|LEVOTHYROXINE/i.test(`${rule.title} ${rule.body}`)) continue;
+    alerts.push({
+      code: rule.code || rule.rule_code || "RED-LINE",
+      severity: rule.severity === "hard_ban" ? "alert" : "watch",
+      title: rule.title || rule.rule_title,
+      detail: rule.body || rule.rule_body,
+      source: "red_lines"
+    });
+  }
+  return alerts.slice(0, 8);
+}
+
+function buildProtocolSnapshot(medications: any[], supplements: any[], conditions: any[], redLines: any[]): ProtocolSnapshot {
+  const medLine = (item: any) => [item.name, item.dose, item.frequency, item.timing].filter(Boolean).join(" · ");
+  // De-duplicate by medication/supplement name (DB may hold repeated rows from
+  // multiple ingests). Keep the newest (rows arrive ordered by created_at desc).
+  const dedupeByName = (arr: any[]) => {
+    const seen = new Set<string>();
+    const out: any[] = [];
+    for (const item of arr) {
+      const key = String(item?.name || "").toLowerCase().replace(/\s+/g, " ").trim();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(item);
+    }
+    return out;
+  };
+  const activeMedications = dedupeByName(medications).map((item) => ({
+    ...item,
+    display: medLine(item)
+  }));
+  const activeSupplements = dedupeByName(supplements).map((item) => ({
+    ...item,
+    display: medLine(item)
+  }));
+  const findItems = (pattern: RegExp) =>
+    Array.from(
+      new Set(
+        [...activeMedications, ...activeSupplements]
+          .filter((item) => pattern.test(`${item.name} ${item.timing} ${item.notes || item.reason || ""}`))
+          .map((item) => item.display || item.name)
+      )
+    );
+  const schedule = [
+    {
+      slot: "wake",
+      label: "فجراً / عند الاستيقاظ",
+      items: findItems(/levothyroxine|fasted|waking|ثيروكسين|الغدة/i),
+      notes: "ماء فقط. انتظر 45-60 دقيقة قبل القهوة أو الطعام."
+    },
+    {
+      slot: "breakfast",
+      label: "الإفطار",
+      items: findItems(/breakfast|vitamin d|omega|wellbutrin|إفطار/i),
+      notes: "يفضل مع وجبة فيها دهون خفيفة لفيتامين د والأوميجا."
+    },
+    {
+      slot: "afternoon",
+      label: "العصر / بين الوجبات",
+      items: findItems(/iron|ferrochel|afternoon|vitamin c|حديد|عصر/i),
+      notes: "افصل الحديد عن Levothyroxine 4-6 ساعات وعن الكافيين/الكالسيوم."
+    },
+    {
+      slot: "bedtime",
+      label: "قبل النوم",
+      items: findItems(/magnesium|threonate|tadalafil|snafi|bedtime|evening|مغنيسيوم|سنافي/i),
+      notes: "حافظ على جرعة Tadalafil 5mg فقط حسب القاعدة الشخصية."
+    }
+  ];
+  const interactions = redLines.map((rule) => ({
+    code: rule.code || rule.rule_code,
+    severity: rule.severity,
+    title: rule.title || rule.rule_title,
+    body: rule.body || rule.rule_body
+  }));
+  return {
+    generated_at: new Date().toISOString(),
+    medications: activeMedications,
+    supplements: activeSupplements,
+    conditions,
+    red_lines: redLines,
+    schedule,
+    interactions,
+    print_sections: [
+      {
+        title: "الأدوية الموصوفة",
+        body: activeMedications.map((item) => `${item.display}${item.notes ? ` — ${item.notes}` : ""}`)
+      },
+      {
+        title: "المكملات العلاجية",
+        body: activeSupplements.map((item) => `${item.display}${item.reason ? ` — ${item.reason}` : ""}`)
+      },
+      {
+        title: "قواعد التعارضات",
+        body: interactions.slice(0, 8).map((item) => `${item.code}: ${item.title} — ${item.body}`)
+      }
+    ]
+  };
+}
+
+function buildNextActions(signals: HealthSignal[], protocol: ProtocolSnapshot, pendingOcr: number): NextAction[] {
+  const actions: NextAction[] = [];
+  const watchSignals = signals.filter((signal) => ["watch", "alert", "needs_review"].includes(signal.status));
+  for (const signal of watchSignals.slice(0, 3)) {
+    actions.push({
+      title: `راجع ${signal.label}`,
+      detail: signal.summary,
+      priority: signal.status === "alert" ? "high" : "medium"
+    });
+  }
+  if (pendingOcr > 0) {
+    actions.push({
+      title: "انتظر اكتمال قراءة الملفات",
+      detail: "بعض الملفات محفوظة لكن OCR لم يكتمل، لذلك المقارنة قد تتحسن بعد اكتمال القراءة.",
+      priority: "medium"
+    });
+  }
+  if (protocol.schedule.some((slot) => slot.slot === "afternoon" && slot.items.length)) {
+    actions.push({
+      title: "ثبت فصل الحديد عن الغدة",
+      detail: "الحديد يبقى في العصر أو المساء، بعيد 4-6 ساعات عن Levothyroxine والقهوة والكالسيوم.",
+      priority: "high"
+    });
+  }
+  if (!actions.length) {
+    actions.push({
+      title: "ارفع التقرير القادم بنفس التاريخ الواضح",
+      detail: "وجود تاريخ التقرير داخل الملف يساعد الداشبورد يقارن شهرياً بشكل أدق.",
+      priority: "low"
+    });
+  }
+  return actions.slice(0, 5);
+}
+
+async function buildHealthSnapshot(personSlug: string): Promise<HealthSnapshot> {
+  return withPerson(personSlug, async (client, person) => {
+    try {
+      await client.query("savepoint health_snapshot_backfill");
+      await backfillStructuredLabMarkers(client, person);
+      await client.query("release savepoint health_snapshot_backfill");
+    } catch {
+      await client.query("rollback to savepoint health_snapshot_backfill").catch(() => undefined);
+      await client.query("release savepoint health_snapshot_backfill").catch(() => undefined);
+    }
+    const [documents, reports, labMarkers, medications, supplements, conditions, redLines] = await Promise.all([
+      client.query(
+        `select id, document_type, title, summary, created_at, metadata
+         from documents
+         where person_id = $1 and coalesce(metadata->>'qa_hidden', 'false') <> 'true'
+         order by created_at desc
+         limit 100`,
+        [person.id]
+      ),
+      client.query(
+        `select id, document_id, source_type, report_kind, title, summary, metrics, trend, status, created_at
+         from report_snapshots
+         where person_id = $1 and coalesce(trend->>'qa_hidden', 'false') <> 'true'
+         order by created_at desc
+         limit 100`,
+        [person.id]
+      ),
+      client.query(
+        `select m.id,
+                m.marker_name,
+                m.value_text,
+                m.value_numeric,
+                m.unit,
+                m.reference_range,
+                m.flag,
+                m.interpretation,
+                m.created_at,
+                p.panel_date,
+                p.lab_name,
+                p.source_document_id,
+                p.summary as panel_summary
+         from lab_markers m
+         join lab_panels p on p.id = m.lab_panel_id
+         where m.person_id = $1
+         order by coalesce(p.panel_date, m.created_at::date) desc, m.created_at desc
+         limit 180`,
+        [person.id]
+      ),
+      client.query(
+        "select medication_name as name, dose, frequency, timing, notes, status, created_at from medications where person_id = $1 and status = 'active' order by created_at desc limit 40",
+        [person.id]
+      ),
+      client.query(
+        "select supplement_name as name, dose, frequency, timing, reason, safety_status, status, created_at from supplements where person_id = $1 and status in ('active','trial') order by created_at desc limit 40",
+        [person.id]
+      ),
+      client.query("select condition_name as name, status, notes, created_at from medical_conditions where person_id = $1 order by created_at desc limit 40", [
+        person.id
+      ]),
+      client.query("select rule_code as code, rule_title as title, rule_body as body, severity from red_lines where person_id = $1 and status = 'active' order by rule_code", [
+        person.id
+      ])
+    ]);
+
+    const pendingOcr = documents.rows.filter((doc) => ["queued", "processing"].includes(doc.metadata?.ocr?.status)).length;
+    const labTrends = buildLabTrends(labMarkers.rows);
+    const healthSignals = buildHealthSignals(labMarkers.rows);
+    const protocolSnapshot = buildProtocolSnapshot(medications.rows, supplements.rows, conditions.rows, redLines.rows);
+    const riskAlerts = buildRiskAlerts(healthSignals, redLines.rows, pendingOcr);
+    const nextActions = buildNextActions(healthSignals, protocolSnapshot, pendingOcr);
+    return {
+      stats: {
+        documents: resultCount(documents),
+        reports: resultCount(reports),
+        lab_markers: resultCount(labMarkers),
+        pending_ocr: pendingOcr,
+        medications: resultCount(medications),
+        supplements: resultCount(supplements),
+        conditions: resultCount(conditions)
+      },
+      recent_documents: documents.rows.slice(0, 12),
+      recent_reports: reports.rows.slice(0, 12),
+      lab_markers: labMarkers.rows,
+      lab_trends: labTrends,
+      medications: medications.rows,
+      supplements: supplements.rows,
+      conditions: conditions.rows,
+      health_signals: healthSignals,
+      risk_alerts: riskAlerts,
+      protocol_snapshot: protocolSnapshot,
+      next_actions: nextActions
+    };
+  });
+}
+
+function wantsStoredHealthContext(text: string) {
+  return /(تحاليل|تحليل|تقرير|تقارير|حديد|مخزون|سكر|كوليسترول|فيتامين|الغدة|ملفي|ذاكرة|محفوظ|review|report|lab|ferritin|iron|glucose|cholesterol|vitamin|thyroid)/i.test(text);
+}
+
+function valueWithUnit(value: unknown, unit?: string | null) {
+  if (value === null || value === undefined || value === "") return "غير متوفر";
+  return `${value}${unit ? ` ${unit}` : ""}`;
+}
+
+function contextualHealthAnswer(snapshot: HealthSnapshot | null, text: string) {
+  if (!snapshot || !wantsStoredHealthContext(text)) return "";
+  const trendLines = snapshot.lab_trends
+    .slice(0, 8)
+    .map((trend) => {
+      const delta = trend.delta === null ? "" : ` · التغير ${trend.delta > 0 ? "+" : ""}${trend.delta}${trend.unit ? ` ${trend.unit}` : ""}`;
+      const previous = trend.previous_value ? ` · السابق ${valueWithUnit(trend.previous_value, trend.unit)}` : "";
+      return `- ${trend.marker_name}: الحالي ${valueWithUnit(trend.latest_value, trend.unit)}${previous}${delta}`;
+    });
+  const reportLines = snapshot.recent_reports.slice(0, 4).map((report) => `- ${report.title}: ${report.status || "saved"} · ${report.summary || "محفوظ"}`);
+  const pending = snapshot.stats.pending_ocr
+    ? `\nفيه ${snapshot.stats.pending_ocr} ملف ما زال في OCR/الاستخراج؛ أقدر أستخدم الملفات المحفوظة الآن وأحدث القراءة بعد اكتمالها.`
+    : "";
+  const meds = snapshot.medications.length
+    ? `\nالأدوية النشطة المسجلة:\n${snapshot.medications
+        .slice(0, 6)
+        .map((med) => `- ${med.name}${med.dose ? ` · ${med.dose}` : ""}${med.timing ? ` · ${med.timing}` : ""}`)
+        .join("\n")}`
+    : "\nما فيه أدوية نشطة مسجلة في الذاكرة حتى الآن.";
+
+  return [
+    "أقدر أشوف الذاكرة الصحية الآن، وهذا اللي عندي قبل أي استنتاج:",
+    `- الملفات المحفوظة: ${snapshot.stats.documents}`,
+    `- التقارير/اللقطات: ${snapshot.stats.reports}`,
+    `- المؤشرات المخبرية المستخرجة: ${snapshot.stats.lab_markers}`,
+    pending,
+    trendLines.length ? `\nأهم المؤشرات المستخرجة:\n${trendLines.join("\n")}` : "\nالملفات موجودة، لكن القيم المخبرية المنظمة لم تُستخرج بعد من أغلبها.",
+    reportLines.length ? `\nآخر التقارير:\n${reportLines.join("\n")}` : "",
+    meds,
+    "\nالخلاصة: أقدر أراجع التحاليل المحفوظة وأقارن القيم التي تم استخراجها. إذا كان رقم معيّن غير ظاهر في المؤشرات، فهو محفوظ كملف لكنه يحتاج OCR/استخراج أدق قبل المقارنة."
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function deterministicCommittee(personSlug: string, sessionId: string, userMessage: string, snapshot: HealthSnapshot | null = null): CommitteeResult {
+  const text = userMessage.toLowerCase();
+  const hits: CommitteeResult["validator_status"]["hits"] = [];
+
+  if (text.includes("ashwagandha") || text.includes("اشواجندا") || text.includes("اشواغندا")) {
+    hits.push({
+      code: "R-T-ASHWAGANDHA",
+      severity: "hard_ban",
+      message: "Blocked by personal red-line rules: do not start Ashwagandha in this profile."
+    });
+  }
+  if (text.includes("tadalafil") || text.includes("سياليس") || text.includes("تادالافيل") || /20\s*mg/.test(text)) {
+    hits.push({
+      code: "R-T-TADALAFIL-20MG",
+      severity: "hard_ban",
+      message: "Blocked: tadalafil 20mg is a hard red-line item for this personal profile."
+    });
+  }
+  if ((text.includes("iron") || text.includes("حديد")) && (text.includes("levothyroxine") || text.includes("ليفوثيروكسين") || text.includes("ثيروكسين"))) {
+    hits.push({
+      code: "R-T-IRON-LEVOTHYROXINE",
+      severity: "strong_caution",
+      message: "Separate iron and levothyroxine by at least 4 hours; do not take them together."
+    });
+  }
+  if ((text.includes("tyrosine") || text.includes("تيروسين")) && (text.includes("wellbutrin") || text.includes("bupropion") || text.includes("ويلبوترين"))) {
+    hits.push({
+      code: "R-T-TYROSINE-WELLBUTRIN",
+      severity: "strong_caution",
+      message: "High-dose L-Tyrosine with Wellbutrin requires caution and should not be escalated without review."
+    });
+  }
+
+  const blocked = hits.some((hit) => hit.severity === "hard_ban");
+  const caution = hits.length > 0 && !blocked;
+  let finalAnswer = "";
+
+  if (blocked) {
+    finalAnswer = [
+      "تم إيقاف هذا المسار حسب قواعد السلامة الشخصية.",
+      ...hits.map((hit) => `- ${hit.message}`),
+      "الخطوة الآمنة: لا تبدأ أو ترفع الجرعة من هذا العنصر، واستخدم بديل أقل خطورة بعد مراجعة السياق الصحي الكامل."
+    ].join("\n");
+  } else if (caution) {
+    finalAnswer = [
+      "فيه تنبيه سلامة مهم قبل التنفيذ:",
+      ...hits.map((hit) => `- ${hit.message}`),
+      "الخلاصة العملية: افصل التوقيت، لا تجمع العناصر المتداخلة، وخل أي تعديل جرعات تدريجي ومراقب."
+    ].join("\n");
+  } else if (text.includes("meal") || text.includes("غذ") || text.includes("اكل") || text.includes("وجبة")) {
+    finalAnswer = [
+      "خطة عامة وآمنة كبداية:",
+      "- بروتين واضح في كل وجبة.",
+      "- كارب بطيء أو ألياف قبل السكريات السريعة.",
+      "- خضار أو سلطة يومياً لتثبيت الشهية والطاقة.",
+      "- ماء ونوم كفاية قبل تقييم أي مكملات.",
+      "هذا توجيه عام، وأقدر أضبطه لاحقاً بعد رفع التحاليل وتسجيل الهدف."
+    ].join("\n");
+  } else if (contextualHealthAnswer(snapshot, userMessage)) {
+    finalAnswer = contextualHealthAnswer(snapshot, userMessage);
+  } else {
+    finalAnswer = [
+      "المسار الإنتاجي شغال الآن عبر Health Committee وليس عبر الشات القديم فقط.",
+      snapshot
+        ? `الذاكرة الطبية متصلة: ${snapshot.stats.documents} ملفات، ${snapshot.stats.reports} تقارير، ${snapshot.stats.lab_markers} مؤشرات مستخرجة.`
+        : "سؤالك مر على الذاكرة الطبية، الراوتر، قواعد السلامة، ثم حفظ delta في HMDB.",
+      "اسأل عن تحليل أو دواء أو جرعة محددة، أو ارفع ملف جديد، وراح أربطه بالملف الصحي."
+    ].join("\n");
+  }
+
+  return {
+    ok: true,
+    request_id: crypto.randomUUID(),
+    final_answer: finalAnswer,
+    validator_status: {
+      status: blocked ? "blocked" : caution ? "caution" : "pass",
+      blocked,
+      hits
+    },
+    models_used: [
+      "router:deterministic-v01",
+      "rayan:safety-rules-v01",
+      "sam:planning-rules-v01",
+      "lena:deferred-until-lab-parser",
+      "theo:deterministic-judge-v01"
+    ],
+    memory_delta: {
+      person_slug: personSlug,
+      session_id: sessionId,
+      event_type: "committee_response",
+      validator_status: blocked ? "blocked" : caution ? "caution" : "pass"
+    }
+  };
+}
+
+const app = Fastify({
+  logger: {
+    level: config.HMDB_LOG_LEVEL,
+    redact: [
+      "req.headers.cookie",
+      "req.headers.authorization",
+      "req.headers.x-hmdb-secret",
+      "req.headers.x-health-webhook-secret",
+      "req.body.user_message",
+      "req.body.question"
+    ]
+  },
+  bodyLimit: 8 * 1024 * 1024
+});
+
+await app.register(helmet, {
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      // Self-contained SPA uses an inline <style> block, an inline <script>,
+      // and inline style="" attributes — allow them for same-origin only.
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrcAttr: ["'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      styleSrcAttr: ["'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      connectSrc: ["'self'"]
+    }
+  }
+});
+await app.register(cors, { origin: false });
+await app.register(cookie);
+await app.register(rateLimit, { max: 120, timeWindow: "1 minute" });
+await app.register(multipart, { limits: { fileSize: 100 * 1024 * 1024, files: 200 } });
+await app.register(fastifyStatic, { root: publicDir, prefix: "/" });
+
+app.setErrorHandler((error, request, reply) => {
+  request.log.error({ err: error, path: request.url }, "request_failed");
+  if (error instanceof z.ZodError) {
+    return reply.code(400).send({
+      error: "bad_request",
+      detail: error.issues.map((issue) => issue.message).join("; "),
+      request_id: request.id
+    });
+  }
+  const statusCode = (error as any).statusCode || 500;
+  reply.code(statusCode).send({
+    error: statusCode === 500 ? "internal_error" : error instanceof Error ? error.message : "request_failed",
+    request_id: request.id
+  });
+});
+
+app.get("/healthz", async (_request, reply) => {
+  const db = await checkDb().catch(() => false);
+  const identity = db ? await getDbIdentity().catch(() => null) : null;
+  return reply.code(db ? 200 : 503).send({
+    status: db ? "ok" : "degraded",
+    service: config.HMDB_API_RESOURCE_NAME,
+    version: "0.1.0",
+    canonical_domain: config.PUBLIC_BASE_URL,
+    db: {
+      ok: db,
+      status: db ? "connected" : "unavailable",
+      resource: config.HMDB_DB_RESOURCE_NAME,
+      identity: identity
+        ? {
+            database_name: identity.database_name,
+            database_user: identity.database_user,
+            server_addr: identity.server_addr,
+            server_port: identity.server_port
+          }
+        : null
+    },
+    files: {
+      resource: config.HMDB_FILES_RESOURCE_NAME,
+      dir: config.HMDB_FILES_DIR
+    },
+    n8n: n8nIntegrationSnapshot(),
+    providers: providerStatus(),
+    uptime_seconds: Math.floor(process.uptime())
+  });
+});
+
+async function handleEmailPasswordLogin(request: FastifyRequest, reply: FastifyReply) {
+  const body = z.object({ email: z.string().email(), password: z.string().min(1) }).parse(request.body);
+  const user = await findAppUserByEmail(body.email);
+  if (!user) return reply.code(401).send({ error: "invalid_local_login" });
+  if (user.status === "pending") return reply.code(403).send({ error: "account_pending" });
+  if (user.status === "suspended") return reply.code(403).send({ error: "account_suspended" });
+  if (!hasLocalPassword(user.metadata)) return reply.code(403).send({ error: "local_password_not_set" });
+  if (!verifyLocalPassword(body.password, user.metadata)) return reply.code(401).send({ error: "invalid_local_login" });
+  await touchUserLogin(user.email);
+  setSession(reply, { slug: user.person_slug || "tareq", email: user.email, role: user.role, status: "active" });
+  return { ok: true, person_slug: user.person_slug, email: user.email, role: user.role, status: "active" };
+}
+
+app.post("/api/login", handleEmailPasswordLogin);
+app.post("/api/email-login", handleEmailPasswordLogin);
+
+app.post("/api/signup", async (request, reply) => {
+  const body = z.object({ email: z.string().email(), password: z.string().min(8) }).parse(request.body);
+  const result = await upsertActiveEmailUser(body.email, body.password);
+  if (result.suspended) return reply.code(403).send({ error: "account_suspended" });
+  await touchUserLogin(result.user.email);
+  setSession(reply, { slug: result.user.person_slug || "tareq", email: result.user.email, role: result.user.role, status: "active" });
+  return { ok: true, status: "active", email: normalizeEmail(body.email), user: redactUserRow(result.user) };
+});
+
+app.post("/api/logout", { preHandler: requireSession }, async (_request, reply) => {
+  clearSession(reply);
+  return { ok: true };
+});
+
+const PatientContextToolSchema = z
+  .object({
+    firebase_uid: z.string().trim().min(1).optional(),
+    email: z.string().trim().email().optional(),
+    person_slug: z
+      .string()
+      .trim()
+      .regex(/^[a-z0-9-]+$/)
+      .optional()
+  })
+  .refine((value) => Boolean(value.firebase_uid || value.email || value.person_slug), {
+    message: "firebase_uid, email, or person_slug is required"
+  });
+
+type PatientContextToolInput = z.output<typeof PatientContextToolSchema>;
+
+async function resolvePersonSlugForTool(input: PatientContextToolInput) {
+  if (input.person_slug) {
+    return input.person_slug;
+  }
+
+  const firebaseUid = input.firebase_uid?.trim() ?? null;
+  const normalizedEmail = input.email?.trim().toLowerCase() ?? null;
+
+  const result = await pool.query<{ person_slug: string | null; status: string | null }>(
+    `
+      select person_slug, status
+      from health_memory.app_users
+      where ($1::text is not null and metadata->>'firebase_uid' = $1)
+         or ($2::text is not null and lower(email) = $2)
+      order by coalesce(last_login_at, updated_at, created_at) desc nulls last
+      limit 1
+    `,
+    [firebaseUid, normalizedEmail]
+  );
+
+  const user = result.rows[0];
+  if (!user || user.status === "suspended") {
+    return null;
+  }
+
+  return user.person_slug || config.HMDB_DEFAULT_PERSON_SLUG;
+}
+
+app.post("/api/tools/patient-snapshot", { preHandler: requireHmdbSecret }, async (request, reply) => {
+  const parsed = PatientContextToolSchema.safeParse(request.body ?? {});
+  if (!parsed.success) {
+    return reply.code(400).send({
+      ok: false,
+      tool: "getPatientSnapshot",
+      message: "A valid firebase_uid, email, or person_slug is required."
+    });
+  }
+
+  try {
+    const personSlug = await resolvePersonSlugForTool(parsed.data);
+    if (!personSlug) {
+      request.log.warn({ tool: "patient-snapshot" }, "patient_snapshot_user_not_found");
+      return reply.code(404).send({
+        ok: false,
+        tool: "getPatientSnapshot",
+        patient_memory_snapshot: null,
+        message: "No active patient context is available for this identity."
+      });
+    }
+
+    const snapshot = await buildHealthSnapshot(personSlug);
+    const recentReports = snapshot.recent_reports ?? [];
+    const recentDocuments = snapshot.recent_documents ?? [];
+    const conditions = snapshot.conditions ?? [];
+    const riskAlerts = snapshot.risk_alerts ?? [];
+    const medications = snapshot.medications ?? [];
+    const supplements = snapshot.supplements ?? [];
+    const labMarkers = snapshot.lab_markers ?? [];
+    const labTrends = snapshot.lab_trends ?? [];
+    const healthSignals = snapshot.health_signals ?? [];
+    const nextActions = snapshot.next_actions ?? [];
+
+    return reply.code(200).send({
+      ok: true,
+      tool: "getPatientSnapshot",
+      patient_memory_snapshot: {
+        user: {
+          person_slug: personSlug
+        },
+        stats: snapshot.stats,
+        recent_reports: recentReports.slice(0, 5),
+        recent_documents: recentDocuments.slice(0, 5),
+        clinical_profile: {
+          medical_conditions: conditions.slice(0, 30),
+          red_lines: riskAlerts.slice(0, 20)
+        },
+        active_medications: medications.slice(0, 30),
+        active_supplements: supplements.slice(0, 30),
+        latest_biomarkers: labMarkers.slice(0, 50),
+        lab_trends: labTrends.slice(0, 30),
+        health_signals: healthSignals.slice(0, 20),
+        risk_alerts: riskAlerts.slice(0, 20),
+        protocol_snapshot: snapshot.protocol_snapshot,
+        next_actions: nextActions.slice(0, 10)
+      },
+      metadata: {
+        source: "entix.health.medical_memory.health_memory",
+        compatibility_route: "/api/tools/patient-snapshot",
+        person_slug: personSlug,
+        generated_at: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    request.log.error({ err: error, tool: "patient-snapshot" }, "patient_snapshot_query_failed");
+    return reply.code(500).send({
+      ok: false,
+      tool: "getPatientSnapshot",
+      error: {
+        message: "The entix.health Team could not retrieve the patient memory snapshot right now."
+      }
+    });
+  }
+});
+
+app.post("/api/tools/get_patient_context", { preHandler: requireHmdbSecret }, async (request, reply) => {
+  const parsed = PatientContextToolSchema.safeParse(request.body ?? {});
+  if (!parsed.success) {
+    return reply.code(400).send({
+      ok: false,
+      tool: "getPatientSnapshot",
+      message: "A valid firebase_uid, email, or person_slug is required."
+    });
+  }
+
+  try {
+    const personSlug = await resolvePersonSlugForTool(parsed.data);
+    if (!personSlug) {
+      request.log.warn({ tool: "get_patient_context" }, "patient_context_user_not_found");
+      return reply.code(404).send({
+        ok: false,
+        tool: "getPatientSnapshot",
+        message: "No active patient context is available for this identity."
+      });
+    }
+
+    const snapshot = await buildHealthSnapshot(personSlug);
+
+    return {
+      ok: true,
+      tool: "getPatientSnapshot",
+      patient_context: {
+        stats: snapshot.stats,
+        recent_reports: snapshot.recent_reports.slice(0, 5),
+        recent_documents: snapshot.recent_documents.slice(0, 5),
+        lab_markers: snapshot.lab_markers.slice(0, 50),
+        lab_trends: snapshot.lab_trends.slice(0, 30),
+        health_signals: (snapshot.health_signals ?? []).slice(0, 20),
+        risk_alerts: (snapshot.risk_alerts ?? []).slice(0, 20),
+        protocol_snapshot: snapshot.protocol_snapshot ?? null,
+        medications: snapshot.medications.slice(0, 30),
+        supplements: snapshot.supplements.slice(0, 30),
+        conditions: snapshot.conditions.slice(0, 30),
+        next_actions: (snapshot.next_actions ?? []).slice(0, 10)
+      },
+      metadata: {
+        source: "entix.health.medical_memory",
+        person_slug: personSlug,
+        generated_at: new Date().toISOString()
+      }
+    };
+  } catch (error) {
+    request.log.error({ err: error, tool: "get_patient_context" }, "patient_context_query_failed");
+    return reply.code(500).send({
+      ok: false,
+      tool: "getPatientSnapshot",
+      message: "The patient context tool is temporarily unavailable. The entix.health Team has been notified."
+    });
+  }
+});
+
+app.get("/api/auth/google/status", async () => {
+  return {
+    enabled: googleOAuthEnabled(),
+    login_url: googleLoginUrl(),
+    redirect_uri: googleRedirectUri()
+  };
+});
+
+app.get("/api/auth/google", async (_request, reply) => {
+  if (!googleOAuthEnabled()) {
+    return reply.code(503).send({ error: "google_oauth_not_configured" });
+  }
+  const state = crypto.randomBytes(24).toString("base64url");
+  setGoogleState(reply, state);
+  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  url.searchParams.set("client_id", config.GOOGLE_OAUTH_CLIENT_ID!);
+  url.searchParams.set("redirect_uri", googleRedirectUri());
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("scope", "openid email profile");
+  url.searchParams.set("state", state);
+  url.searchParams.set("access_type", "offline");
+  url.searchParams.set("prompt", "select_account");
+  return reply.redirect(url.toString());
+});
+
+app.get("/api/auth/google/callback", async (request, reply) => {
+  const query = z.object({ code: z.string().min(1), state: z.string().min(8) }).parse(request.query);
+  const expectedState = readGoogleState(request);
+  clearGoogleState(reply);
+  if (!googleOAuthEnabled()) return reply.redirect(publicRedirect("?auth=google_not_configured", "access"));
+  if (!expectedState || expectedState !== query.state) return reply.redirect(publicRedirect("?auth=state_error", "access"));
+
+  const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      code: query.code,
+      client_id: config.GOOGLE_OAUTH_CLIENT_ID!,
+      client_secret: config.GOOGLE_OAUTH_CLIENT_SECRET!,
+      redirect_uri: googleRedirectUri(),
+      grant_type: "authorization_code"
+    })
+  });
+  if (!tokenResponse.ok) return reply.redirect(publicRedirect("?auth=google_error", "access"));
+  const tokenPayload = (await tokenResponse.json()) as { access_token?: string };
+  if (!tokenPayload.access_token) return reply.redirect(publicRedirect("?auth=google_error", "access"));
+
+  const profileResponse = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
+    headers: { authorization: `Bearer ${tokenPayload.access_token}` }
+  });
+  if (!profileResponse.ok) return reply.redirect(publicRedirect("?auth=google_error", "access"));
+  const profile = (await profileResponse.json()) as { email?: string; email_verified?: boolean; name?: string; picture?: string };
+  if (!profile.email || !profile.email_verified) return reply.redirect(publicRedirect("?auth=google_unverified", "access"));
+
+  const email = normalizeEmail(profile.email);
+  if (adminEmails.has(email)) {
+    await ensureAdminUser(email);
+  }
+
+  const user = adminEmails.has(email)
+    ? await findAppUserByEmail(email)
+    : await activateOAuthUser(email, { name: profile.name, picture: profile.picture });
+  if (!user || user.status === "suspended") return reply.redirect(publicRedirect("?auth=suspended", "access"));
+
+  await touchUserLogin(email);
+  setSession(reply, { slug: user.person_slug || "tareq", email, role: user.role, status: "active" });
+  return reply.redirect(publicRedirect("?auth=ok", "dashboard"));
+});
+
+app.get("/api/bootstrap", { preHandler: requireSession }, async (request) => {
+  const db = await checkDb().catch(() => false);
+  const session = currentSession(request);
+  const personSlug = session?.slug || config.HMDB_DEFAULT_PERSON_SLUG;
+  const person = await getPersonBySlug(personSlug);
+  return {
+    ok: true,
+    app: "T-PER-PRJ-HEALTH",
+    project_code: "T-PER-PRJ-HEALTH",
+    display_name: "T-OS Personal Health Brain",
+    resource_names: {
+      coolify_project: "T-PER-PRJ-HEALTH",
+      api: config.HMDB_API_RESOURCE_NAME,
+      database: config.HMDB_DB_RESOURCE_NAME,
+      files: config.HMDB_FILES_RESOURCE_NAME,
+      workflow: config.N8N_HEALTH_COMMITTEE_WORKFLOW_NAME
+    },
+    provider_status: providerStatus(),
+    base_url: config.PUBLIC_BASE_URL,
+    person_slug: personSlug,
+    auth: {
+      email: session?.email,
+      role: session?.role,
+      is_admin: session?.role === "admin",
+      google_enabled: googleOAuthEnabled(),
+      google_login_url: googleLoginUrl()
+    },
+    db_connected: db,
+    person_ready: Boolean(person),
+    n8n: n8nIntegrationSnapshot(),
+    n8n_general_chat: Boolean(config.N8N_GENERAL_CHAT_WEBHOOK),
+    n8n_document_ingest: Boolean(config.N8N_DOCUMENT_INGEST_WEBHOOK),
+    n8n_health_committee: Boolean(config.N8N_HEALTH_COMMITTEE_WEBHOOK),
+    hmdb_ready: db && Boolean(person)
+  };
+});
+
+app.get("/api/integrations/n8n/status", { preHandler: requireSession }, async () => {
+  return { ok: true, n8n: n8nIntegrationSnapshot() };
+});
+
+app.get("/api/admin/users", { preHandler: requireAdmin }, async () => {
+  const result = await pool.query(
+    `select id, email, person_slug, role, status, created_at, updated_at, last_login_at, metadata
+     from health_memory.app_users
+     order by created_at desc
+     limit 100`
+  );
+  return { users: result.rows.map(redactUserRow) };
+});
+
+app.post("/api/admin/users", { preHandler: requireAdmin }, async (request) => {
+  const body = z
+    .object({
+      email: z.string().email(),
+      person_slug: z.string().regex(/^[a-z0-9-]+$/).default("tareq"),
+      role: z.enum(["admin", "member"]).default("member"),
+      status: z.enum(["active", "pending", "suspended"]).default("active"),
+      password: z.string().min(8).optional()
+    })
+    .parse(request.body);
+  const metadata = body.password ? { [LOCAL_PASSWORD_METADATA_KEY]: hashLocalPassword(body.password) } : {};
+  const result = await pool.query(
+    `insert into health_memory.app_users (email, person_slug, role, status, created_by, metadata)
+     values ($1, $2, $3, $4, 'admin-ui', $5::jsonb)
+     on conflict (email) do update
+     set person_slug = excluded.person_slug,
+         role = excluded.role,
+         status = excluded.status,
+         metadata = app_users.metadata || excluded.metadata,
+         updated_at = now()
+     returning id, email, person_slug, role, status, created_at, updated_at, last_login_at, metadata`,
+    [normalizeEmail(body.email), body.person_slug, body.role, body.status, JSON.stringify(metadata)]
+  );
+  return { ok: true, user: redactUserRow(result.rows[0]) };
+});
+
+app.post("/api/admin/users/:id/approve", { preHandler: requireAdmin }, async (request) => {
+  const params = z.object({ id: z.string().uuid() }).parse(request.params);
+  const body = z.object({ person_slug: z.string().regex(/^[a-z0-9-]+$/).default("tareq"), role: z.enum(["admin", "member"]).default("member") }).parse(request.body ?? {});
+  const result = await pool.query(
+    `update health_memory.app_users
+     set person_slug = $2, role = $3, status = 'active', updated_at = now()
+     where id = $1
+     returning id, email, person_slug, role, status, created_at, updated_at, last_login_at, metadata`,
+    [params.id, body.person_slug, body.role]
+  );
+  return { ok: true, user: redactUserRow(result.rows[0] ?? null) };
+});
+
+app.get("/api/documents", { preHandler: requireSession }, async (request) => {
+  const session = currentSession(request);
+  return withPerson(session?.slug || config.HMDB_DEFAULT_PERSON_SLUG, async (client, person) => {
+    const result = await client.query(
+      `select id, document_type, title, file_hash, summary, created_at, metadata
+       from documents
+       where person_id = $1
+         and coalesce(metadata->>'qa_hidden', 'false') <> 'true'
+       order by created_at desc
+       limit 100`,
+      [person.id]
+    );
+    return { documents: result.rows };
+  });
+});
+
+app.get("/api/documents/:id/file", { preHandler: requireSession }, async (request, reply) => {
+  const session = currentSession(request);
+  const params = z.object({ id: z.string().uuid() }).parse(request.params);
+  return withPerson(session?.slug || config.HMDB_DEFAULT_PERSON_SLUG, async (client, person) => {
+    const result = await client.query(
+      `select id, document_type, title, file_path, metadata
+       from documents
+       where id = $1 and person_id = $2
+         and coalesce(metadata->>'qa_hidden', 'false') <> 'true'`,
+      [params.id, person.id]
+    );
+    const document = result.rows[0];
+    if (!document?.file_path) return reply.code(404).send({ error: "file_not_found" });
+    const root = path.resolve(config.HMDB_FILES_DIR);
+    const resolved = path.resolve(document.file_path);
+    if (!resolved.startsWith(`${root}${path.sep}`)) return reply.code(403).send({ error: "file_outside_storage" });
+    await fs.promises.access(resolved, fs.constants.R_OK);
+    const stat = await fs.promises.stat(resolved);
+    const mime = previewMimeForPath(resolved, document.document_type);
+    reply.header("content-type", mime);
+    reply.header("content-length", String(stat.size));
+    reply.header("cache-control", "private, max-age=120");
+    reply.header("content-disposition", `inline; filename="${inlineFilename(document.title)}"`);
+    return reply.send(fs.createReadStream(resolved));
+  });
+});
+
+app.get("/api/conversations", { preHandler: requireSession }, async (request) => {
+  const session = currentSession(request);
+  return withPerson(session?.slug || config.HMDB_DEFAULT_PERSON_SLUG, async (client, person) => {
+    const result = await client.query(
+      `select s.id,
+              s.title,
+              s.summary,
+              s.pinned,
+              s.status,
+              s.last_message_at,
+              s.created_at,
+              s.updated_at,
+              coalesce(count(m.id), 0)::int as message_count
+       from chat_sessions s
+       left join chat_messages m on m.session_id = s.id
+       where s.person_id = $1 and s.status = 'active'
+       group by s.id
+       order by s.pinned desc, s.last_message_at desc nulls last, s.created_at desc
+       limit 80`,
+      [person.id]
+    );
+    return { conversations: result.rows };
+  });
+});
+
+app.post("/api/conversations", { preHandler: requireSession }, async (request) => {
+  const session = currentSession(request);
+  const body = z.object({ title: z.string().trim().min(1).max(120).optional() }).parse(request.body ?? {});
+  const conversation = await ensureChatSession(
+    session?.slug || config.HMDB_DEFAULT_PERSON_SLUG,
+    undefined,
+    body.title || "محادثة صحية جديدة",
+    session?.email
+  );
+  return { ok: true, conversation };
+});
+
+app.get("/api/conversations/:id/messages", { preHandler: requireSession }, async (request, reply) => {
+  const session = currentSession(request);
+  const params = z.object({ id: z.string().uuid() }).parse(request.params);
+  return withPerson(session?.slug || config.HMDB_DEFAULT_PERSON_SLUG, async (client, person) => {
+    const conversation = await client.query(
+      `select id, title, summary, pinned, status, last_message_at, created_at, updated_at
+       from chat_sessions
+       where id = $1 and person_id = $2 and status = 'active'
+       limit 1`,
+      [params.id, person.id]
+    );
+    if (!conversation.rows[0]) return reply.code(404).send({ error: "conversation_not_found" });
+    const messages = await client.query(
+      `select id, role, body, metadata, created_at
+       from chat_messages
+       where session_id = $1 and person_id = $2
+       order by created_at asc
+       limit 300`,
+      [params.id, person.id]
+    );
+    return { conversation: conversation.rows[0], messages: messages.rows };
+  });
+});
+
+app.patch("/api/conversations/:id", { preHandler: requireSession }, async (request, reply) => {
+  const session = currentSession(request);
+  const params = z.object({ id: z.string().uuid() }).parse(request.params);
+  const body = z
+    .object({
+      title: z.string().trim().min(1).max(120).optional(),
+      pinned: z.boolean().optional(),
+      status: z.enum(["active", "archived"]).optional()
+    })
+    .parse(request.body ?? {});
+  return withPerson(session?.slug || config.HMDB_DEFAULT_PERSON_SLUG, async (client, person) => {
+    const existing = await client.query("select id from chat_sessions where id = $1 and person_id = $2 limit 1", [params.id, person.id]);
+    if (!existing.rows[0]) return reply.code(404).send({ error: "conversation_not_found" });
+    const result = await client.query(
+      `update chat_sessions
+       set title = coalesce($3, title),
+           pinned = coalesce($4, pinned),
+           status = coalesce($5, status),
+           updated_at = now()
+       where id = $1 and person_id = $2
+       returning id, title, summary, pinned, status, last_message_at, created_at, updated_at`,
+      [params.id, person.id, body.title ?? null, body.pinned ?? null, body.status ?? null]
+    );
+    return { ok: true, conversation: result.rows[0] };
+  });
+});
+
+app.get("/api/dashboard", { preHandler: requireSession }, async (request) => {
+  const session = currentSession(request);
+  try {
+    return await withPerson(session?.slug || config.HMDB_DEFAULT_PERSON_SLUG, async (client, person) => {
+    const warnings: string[] = [];
+    try {
+      await client.query("savepoint dashboard_backfill");
+      await backfillStructuredLabMarkers(client, person);
+      await client.query("release savepoint dashboard_backfill");
+    } catch (error) {
+      await client.query("rollback to savepoint dashboard_backfill").catch(() => undefined);
+      await client.query("release savepoint dashboard_backfill").catch(() => undefined);
+      request.log.warn({ err: error, person_slug: person.slug }, "dashboard_backfill_failed");
+      warnings.push("structured_backfill");
+    }
+    let dashboardQueryIndex = 0;
+    async function safeDashboardQuery(label: string, sql: string, params: unknown[]) {
+      const savepoint = `dashboard_query_${++dashboardQueryIndex}`;
+      await client.query(`savepoint ${savepoint}`);
+      try {
+        const result = await client.query(sql, params);
+        await client.query(`release savepoint ${savepoint}`);
+        return result;
+      } catch (error) {
+        await client.query(`rollback to savepoint ${savepoint}`).catch(() => undefined);
+        await client.query(`release savepoint ${savepoint}`).catch(() => undefined);
+        request.log.warn({ err: error, label, person_slug: person.slug }, "dashboard_query_failed");
+        warnings.push(label);
+        return { rows: [], rowCount: 0 };
+      }
+    }
+    const reports = await safeDashboardQuery(
+        "reports",
+        `select id, document_id, session_id, source_type, report_kind, title, summary, metrics, trend, status, created_at
+         from report_snapshots
+         where person_id = $1
+           and coalesce(trend->>'qa_hidden', 'false') <> 'true'
+         order by created_at desc
+         limit 100`,
+        [person.id]
+      );
+    const documents = await safeDashboardQuery(
+        "documents",
+        `select id, document_type, title, summary, created_at, metadata
+         from documents
+         where person_id = $1
+           and coalesce(metadata->>'qa_hidden', 'false') <> 'true'
+         order by created_at desc
+         limit 100`,
+        [person.id]
+      );
+    const memory = await safeDashboardQuery(
+        "memory_events",
+        `select event_type, event_title, event_body, created_at
+         from memory_events
+         where person_id = $1
+           and coalesce(raw_delta->>'qa_hidden', 'false') <> 'true'
+         order by created_at desc
+         limit 20`,
+        [person.id]
+      );
+    const conversations = await safeDashboardQuery(
+        "conversations",
+        `select id, title, pinned, last_message_at, created_at
+         from chat_sessions
+         where person_id = $1 and status = 'active'
+         order by last_message_at desc nulls last
+         limit 10`,
+        [person.id]
+      );
+    const labPanels = await safeDashboardQuery(
+        "lab_panels",
+        `select id, panel_date, lab_name, summary, created_at
+         from lab_panels
+         where person_id = $1
+         order by panel_date desc nulls last, created_at desc
+         limit 10`,
+        [person.id]
+      );
+    const labMarkers = await safeDashboardQuery(
+        "lab_markers",
+        `select m.id,
+                m.marker_name,
+                m.value_text,
+                m.value_numeric,
+                m.unit,
+                m.reference_range,
+                m.flag,
+                m.interpretation,
+                m.created_at,
+                p.panel_date,
+                p.lab_name,
+                p.source_document_id,
+                p.summary as panel_summary
+         from lab_markers m
+         join lab_panels p on p.id = m.lab_panel_id
+         where m.person_id = $1
+         order by coalesce(p.panel_date, m.created_at::date) desc, m.created_at desc
+         limit 180`,
+        [person.id]
+      );
+    const medications = await safeDashboardQuery(
+        "medications",
+        "select medication_name as name, dose, frequency, timing, notes, status, created_at from medications where person_id = $1 and status = 'active' order by created_at desc limit 40",
+        [person.id]
+      );
+    const supplements = await safeDashboardQuery(
+        "supplements",
+        "select supplement_name as name, dose, frequency, timing, reason, safety_status, status, created_at from supplements where person_id = $1 and status in ('active','trial') order by created_at desc limit 40",
+        [person.id]
+      );
+    const conditions = await safeDashboardQuery(
+        "medical_conditions",
+        "select condition_name as name, status, notes, created_at from medical_conditions where person_id = $1 order by created_at desc limit 40",
+        [person.id]
+      );
+    const redLines = await safeDashboardQuery(
+        "red_lines",
+        "select rule_code as code, rule_title as title, rule_body as body, severity from red_lines where person_id = $1 and status = 'active' order by rule_code",
+        [person.id]
+      );
+    const pendingOcr = documents.rows.filter((doc) => ["queued", "processing"].includes(doc.metadata?.ocr?.status)).length;
+    const labTrends = buildLabTrends(labMarkers.rows);
+    const healthSignals = buildHealthSignals(labMarkers.rows);
+    const protocolSnapshot = buildProtocolSnapshot(medications.rows, supplements.rows, conditions.rows, redLines.rows);
+    const riskAlerts = buildRiskAlerts(healthSignals, redLines.rows, pendingOcr);
+    const nextActions = buildNextActions(healthSignals, protocolSnapshot, pendingOcr);
+    return {
+      ok: true,
+      stats: {
+        reports: resultCount(reports),
+        documents: resultCount(documents),
+        recent_memory_events: resultCount(memory),
+        conversations: resultCount(conversations),
+        lab_panels: resultCount(labPanels),
+        lab_markers: resultCount(labMarkers),
+        medications: resultCount(medications),
+        supplements: resultCount(supplements),
+        conditions: resultCount(conditions)
+      },
+      reports: reports.rows,
+      documents: documents.rows,
+      memory_events: memory.rows,
+      conversations: conversations.rows,
+      lab_panels: labPanels.rows,
+      lab_markers: labMarkers.rows,
+      lab_trends: labTrends,
+      health_signals: healthSignals,
+      risk_alerts: riskAlerts,
+      protocol_snapshot: protocolSnapshot,
+      next_actions: nextActions,
+      latest_report: reports.rows[0] || null,
+      medications: medications.rows,
+      supplements: supplements.rows,
+      conditions: conditions.rows,
+      red_lines: redLines.rows,
+      warnings
+    };
+    });
+  } catch (error) {
+    request.log.warn({ err: error, person_slug: session?.slug || config.HMDB_DEFAULT_PERSON_SLUG }, "dashboard_unavailable");
+    return emptyDashboardResponse(["dashboard_unavailable"]);
+  }
+});
+
+app.get("/api/protocol", { preHandler: requireSession }, async (request) => {
+  const session = currentSession(request);
+  return withPerson(session?.slug || config.HMDB_DEFAULT_PERSON_SLUG, async (client, person) => {
+    const [medications, supplements, conditions, redLines] = await Promise.all([
+      client.query(
+        "select medication_name as name, dose, frequency, timing, notes, status, created_at from medications where person_id = $1 and status = 'active' order by created_at desc limit 80",
+        [person.id]
+      ),
+      client.query(
+        "select supplement_name as name, dose, frequency, timing, reason, safety_status, status, created_at from supplements where person_id = $1 and status in ('active','trial') order by created_at desc limit 80",
+        [person.id]
+      ),
+      client.query("select condition_name as name, status, notes, created_at from medical_conditions where person_id = $1 order by created_at desc limit 80", [
+        person.id
+      ]),
+      client.query("select rule_code as code, rule_title as title, rule_body as body, severity from red_lines where person_id = $1 and status = 'active' order by rule_code", [
+        person.id
+      ])
+    ]);
+    return {
+      ok: true,
+      protocol_snapshot: buildProtocolSnapshot(medications.rows, supplements.rows, conditions.rows, redLines.rows)
+    };
+  });
+});
+
+app.post("/api/chat", { preHandler: requireSession }, async (request, reply) => {
+  const body = z
+    .object({
+      question: z.string().trim().min(1).max(4000),
+      session_id: z.string().trim().max(120).optional(),
+      conversation_id: z.string().uuid().nullable().optional(),
+      analyze: z.boolean().optional()
+    })
+    .parse(request.body);
+  const result = await runHealthCommittee(request, body.question, body.conversation_id || body.session_id, body.analyze);
+  return reply.send(result);
+});
+
+function looksLikeWorkflowFailure(payload: any, rawAnswer: string) {
+  const status = String(payload?.status || payload?.execution_status || "").toLowerCase();
+  const error = String(payload?.error || payload?.error_message || payload?.message || "").toLowerCase();
+  const answer = rawAnswer.toLowerCase();
+  return (
+    payload?.ok === false ||
+    status === "failed" ||
+    status === "error" ||
+    error.includes("workflow execution failed") ||
+    answer.includes("workflow execution failed") ||
+    answer === "unknown"
+  );
+}
+
+async function runHealthCommittee(request: any, userMessage: string, requestedSessionId?: string, wantsCouncil?: boolean) {
+  const session = currentSession(request);
+  const personSlug = session?.slug || config.HMDB_DEFAULT_PERSON_SLUG;
+  const conversation = await ensureChatSession(personSlug, requestedSessionId, userMessage, session?.email);
+  const sessionId = conversation.id;
+  await saveChatMessage(personSlug, sessionId, "user", userMessage, {
+    source: "clinical-clarity-ui",
+    email: session?.email || null
+  });
+  const pastedReport = await maybeSavePastedReport(personSlug, sessionId, userMessage, session?.email);
+
+  await withPerson(personSlug, async (client, person) => {
+    await client.query(
+      `insert into memory_events (person_id, source, event_type, event_title, event_body, importance, session_id, raw_delta)
+       values ($1, 'clinical-clarity-ui', 'chat_question', 'Health committee question', $2, 2, $3, $4)`,
+      [person.id, userMessage, sessionId, { route: "api_health_chat", email: session?.email, pasted_report_id: pastedReport?.report_snapshot?.id || null }]
+    );
+  });
+
+  const healthSnapshot = await buildHealthSnapshot(personSlug).catch((error: unknown) => {
+    request.log.warn({ err: error }, "health_snapshot_unavailable");
+    return null;
+  });
+  const providers = providerStatus();
+  const resourceNames = {
+    db_resource: config.HMDB_DB_RESOURCE_NAME,
+    api_resource: config.HMDB_API_RESOURCE_NAME,
+    files_resource: config.HMDB_FILES_RESOURCE_NAME
+  };
+  const timelineBase = [
+    {
+      step: "context_loaded",
+      status: healthSnapshot ? "ok" : "degraded",
+      source: config.HMDB_DB_RESOURCE_NAME,
+      db_resource: config.HMDB_DB_RESOURCE_NAME
+    },
+    {
+      step: "committee",
+      status: config.N8N_HEALTH_COMMITTEE_WEBHOOK ? "n8n_configured" : "local_deterministic_fallback",
+      workflow: config.N8N_HEALTH_COMMITTEE_WORKFLOW_NAME
+    },
+    { step: "validator", status: "deterministic_enabled" }
+  ];
+
+  // In-API doctor council (preferred). Reuses the deterministic validator's
+  // PHI-aware red-line hits as safety input, then runs the multi-model network.
+  if (councilEnabled()) {
+    const redLineHits = deterministicCommittee(personSlug, sessionId, userMessage, healthSnapshot).validator_status.hits;
+    const pastMemory = await withPerson(personSlug, async (client, person) => {
+      const r = await client.query(
+        `select event_type, event_body, created_at from memory_events
+         where person_id = $1 and event_type in ('chat_question','chat_answer')
+           and (session_id is null or session_id <> $2)
+         order by created_at desc limit 14`,
+        [person.id, sessionId]
+      );
+      if (!r.rows.length) return "";
+      return r.rows
+        .reverse()
+        .map((x: any) => {
+          const who = x.event_type === "chat_question" ? "المستخدم" : "المجلس";
+          const when = new Date(x.created_at).toISOString().slice(0, 10);
+          return `[${when}] ${who}: ${String(x.event_body || "").replace(/\s+/g, " ").slice(0, 240)}`;
+        })
+        .join("\n");
+    }).catch(() => "");
+    // Route: full council for diagnostic / lab-analysis requests; otherwise a
+    // fast single-model direct reply for ordinary discussion (saves latency).
+    const useCouncil = Boolean(wantsCouncil) || isDiagnosticIntent(userMessage);
+    const engine = useCouncil ? runCouncil : runDirect;
+    const council = await engine({
+      personSlug,
+      sessionId,
+      userMessage,
+      memoryContext: healthSnapshot,
+      redLineHits,
+      pastMemory
+    }).catch((error: unknown) => {
+      request.log.warn({ err: error }, "council_unavailable");
+      return null;
+    });
+    if (council && council.ok) {
+      const direct = !useCouncil;
+      const timeline = [
+        ...timelineBase,
+        { step: direct ? "direct" : "council", status: "ok", workflow: direct ? "direct-chat" : "in-api-doctor-council" },
+        { step: "memory_saved", status: "saved", source: config.HMDB_DB_RESOURCE_NAME }
+      ];
+      const councilMeta: Record<string, unknown> = direct
+        ? { engine: "direct-chat", mode: "direct", member_status: council.member_status }
+        : { engine: "in-api-doctor-council", confidence: council.confidence, member_status: council.member_status, sources: council.sources };
+      const meta: Record<string, unknown> = {
+        request_id: council.request_id,
+        validator_status: council.validator_status,
+        models_used: council.models_used,
+        provider_status: providers,
+        resource_names: resourceNames,
+        timeline,
+        council: councilMeta
+      };
+      if (direct) meta.mode = "direct";
+      else { meta.confidence = council.confidence; meta.sources = council.sources; }
+      await saveChatMessage(personSlug, sessionId, "assistant", council.final_answer, meta);
+      return {
+        ok: council.ok,
+        answer: council.final_answer,
+        conversation_id: sessionId,
+        conversation,
+        captured_report: pastedReport?.report_snapshot || null,
+        memory_context_used: Boolean(healthSnapshot),
+        ...meta
+      };
+    }
+  }
+
+  if (!config.N8N_HEALTH_COMMITTEE_WEBHOOK) {
+    const fallback = deterministicCommittee(personSlug, sessionId, userMessage, healthSnapshot);
+    const timeline = [
+      ...timelineBase,
+      { step: "memory_saved", status: "saved", source: config.HMDB_DB_RESOURCE_NAME }
+    ];
+    const n8nFallbackMeta = {
+      workflow: "local-deterministic-fallback",
+      configured: false,
+      ok: false,
+      fallback_used: true,
+      fallback_reason: "missing_N8N_HEALTH_COMMITTEE_WEBHOOK",
+      n8n_status: n8nIntegrationSnapshot()
+    };
+    await saveCommitteeResult(personSlug, sessionId, fallback);
+    await saveChatMessage(personSlug, sessionId, "assistant", fallback.final_answer, {
+      request_id: fallback.request_id,
+      validator_status: fallback.validator_status,
+      models_used: fallback.models_used,
+      provider_status: providers,
+      resource_names: resourceNames,
+      timeline,
+      n8n: n8nFallbackMeta
+    });
+    return {
+      ok: fallback.ok,
+      answer: fallback.final_answer,
+      conversation_id: sessionId,
+      conversation,
+      captured_report: pastedReport?.report_snapshot || null,
+      request_id: fallback.request_id,
+      validator_status: fallback.validator_status,
+      models_used: fallback.models_used,
+      provider_status: providers,
+      resource_names: resourceNames,
+      timeline,
+      memory_context_used: Boolean(healthSnapshot),
+      n8n: n8nFallbackMeta
+    };
+  }
+
+  let payload: any = null;
+  let n8nOk = false;
+  let n8nHttpStatus: number | null = null;
+  let n8nParseStatus: "json" | "non_json" | "not_called" = "not_called";
+  let n8nFailureReason: string | null = null;
+  try {
+    const n8nResponse = await fetchWithTimeout(
+      config.N8N_HEALTH_COMMITTEE_WEBHOOK,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(config.N8N_HEALTH_COMMITTEE_SECRET ? { "x-health-webhook-secret": config.N8N_HEALTH_COMMITTEE_SECRET } : {})
+        },
+        body: JSON.stringify({
+          person_slug: personSlug,
+          session_id: sessionId,
+          user_message: userMessage,
+          attachments: [],
+          source: "clinical-clarity-ui",
+          workflow: config.N8N_HEALTH_COMMITTEE_WORKFLOW_NAME,
+          db_resource: config.HMDB_DB_RESOURCE_NAME,
+          api_resource: config.HMDB_API_RESOURCE_NAME,
+          files_resource: config.HMDB_FILES_RESOURCE_NAME,
+          provider_status: providers,
+          source_domain: config.PUBLIC_BASE_URL,
+          memory_context: healthSnapshot
+            ? {
+                stats: healthSnapshot.stats,
+                lab_trends: healthSnapshot.lab_trends.slice(0, 20),
+                recent_reports: healthSnapshot.recent_reports.slice(0, 10),
+                recent_documents: healthSnapshot.recent_documents.slice(0, 10),
+                medications: healthSnapshot.medications.slice(0, 20),
+                supplements: healthSnapshot.supplements.slice(0, 20),
+                conditions: healthSnapshot.conditions.slice(0, 20)
+              }
+            : null
+        })
+      },
+      N8N_CHAT_TIMEOUT_MS
+    );
+    n8nHttpStatus = n8nResponse.status;
+    n8nOk = n8nResponse.ok;
+    payload = await n8nResponse
+      .json()
+      .then((json) => {
+        n8nParseStatus = "json";
+        return json;
+      })
+      .catch(() => {
+        n8nParseStatus = "non_json";
+        n8nFailureReason = "n8n_non_json_response";
+        return { ok: false, final_answer: "n8n returned a non-JSON response" };
+      });
+  } catch (error) {
+    request.log.warn({ err: error }, "n8n_health_committee_unavailable");
+    n8nFailureReason = "n8n_timeout_or_unavailable";
+    payload = null;
+  }
+
+  const rawAnswer = String(payload?.final_answer || payload?.answer || payload?.message || "");
+  const workflowFailed = looksLikeWorkflowFailure(payload, rawAnswer);
+  const shouldUseFallback = !n8nOk || workflowFailed || !rawAnswer || rawAnswer === "No answer returned.";
+  if (shouldUseFallback && !n8nFailureReason) {
+    if (!n8nOk) {
+      n8nFailureReason = `n8n_http_${n8nHttpStatus ?? "unknown"}`;
+    } else if (workflowFailed) {
+      n8nFailureReason = "n8n_workflow_failed";
+    } else {
+      n8nFailureReason = "n8n_empty_answer";
+    }
+  }
+  const fallback = shouldUseFallback ? deterministicCommittee(personSlug, sessionId, userMessage, healthSnapshot) : null;
+  const answer = fallback?.final_answer || rawAnswer;
+  const timeline = [
+    ...timelineBase,
+    {
+      step: "n8n_response",
+      status: n8nOk && !workflowFailed ? "ok" : "degraded",
+      workflow: config.N8N_HEALTH_COMMITTEE_WORKFLOW_NAME
+    },
+    { step: "memory_saved", status: "saved", source: config.HMDB_DB_RESOURCE_NAME }
+  ];
+  const n8nMeta = {
+    workflow: config.N8N_HEALTH_COMMITTEE_WORKFLOW_NAME,
+    configured: true,
+    ok: n8nOk && !workflowFailed && Boolean(rawAnswer),
+    http_status: n8nHttpStatus,
+    parse_status: n8nParseStatus,
+    fallback_used: shouldUseFallback,
+    fallback_reason: shouldUseFallback ? n8nFailureReason || "n8n_unusable_response" : null,
+    n8n_status: n8nIntegrationSnapshot()
+  };
+  await saveChatMessage(personSlug, sessionId, "assistant", answer, {
+    request_id: payload?.request_id || fallback?.request_id || request.id,
+    validator_status: payload?.validator_status || fallback?.validator_status || { status: "unknown", blocked: false, hits: [] },
+    models_used: payload?.models_used || fallback?.models_used || [],
+    provider_status: payload?.provider_status || providers,
+    resource_names: payload?.resource_names || resourceNames,
+    timeline: payload?.timeline || timeline,
+    n8n: n8nMeta
+  });
+  return {
+    ok: Boolean(payload?.ok || fallback?.ok),
+    answer,
+    conversation_id: sessionId,
+    conversation,
+    captured_report: pastedReport?.report_snapshot || null,
+    request_id: payload?.request_id || fallback?.request_id || request.id,
+    validator_status: payload?.validator_status || fallback?.validator_status || { status: "unknown", blocked: false, hits: [] },
+    models_used: payload?.models_used || fallback?.models_used || [],
+    provider_status: payload?.provider_status || providers,
+    resource_names: payload?.resource_names || resourceNames,
+    timeline: payload?.timeline || timeline,
+    memory_context_used: Boolean(healthSnapshot),
+    n8n: n8nMeta
+  };
+}
+
+async function saveCommitteeResult(personSlug: string, sessionId: string, result: CommitteeResult) {
+  await withPerson(personSlug, async (client, person) => {
+    await client.query(
+      `insert into memory_events (person_id, source, event_type, event_title, event_body, importance, session_id, raw_delta)
+       values ($1, 'health-committee', 'chat_answer', 'Health committee answer', $2, 3, $3, $4)`,
+      [person.id, result.final_answer, sessionId, result]
+    );
+  });
+}
+
+app.post("/api/health/chat", { preHandler: requireSession }, async (request, reply) => {
+  const body = z
+    .object({
+      user_message: z.string().trim().min(1).max(6000),
+      session_id: z.string().trim().max(120).optional(),
+      conversation_id: z.string().uuid().nullable().optional()
+    })
+    .parse(request.body);
+  return reply.send(await runHealthCommittee(request, body.user_message, body.conversation_id || body.session_id));
+});
+
+app.post("/api/documents", { preHandler: requireSession }, async (request, reply) => {
+  const session = currentSession(request);
+  const personSlug = session?.slug || config.HMDB_DEFAULT_PERSON_SLUG;
+  const personDir = path.join(config.HMDB_FILES_DIR, personSlug);
+  await fs.promises.mkdir(personDir, { recursive: true, mode: 0o700 });
+
+  const results: Array<Record<string, unknown>> = [];
+  let linkedSession: any = null;
+
+  for await (const data of request.files()) {
+    const originalName = data.filename || "upload.dat";
+    try {
+      const multipartFields = (data as any).fields || {};
+      const fieldSessionId = String(multipartFields.session_id?.value || multipartFields.conversation_id?.value || "").trim();
+      if (!linkedSession && fieldSessionId) {
+        linkedSession = await ensureChatSession(personSlug, fieldSessionId, `رفع ملفات صحية`, session?.email);
+      }
+
+      const ext = uploadExtension(originalName);
+      const safeTitle = originalName.replace(/[^\w.\- ]+/g, "").slice(0, 140) || `document-${Date.now()}${ext}`;
+      const buffer = await data.toBuffer();
+      const fileHash = crypto.createHash("sha256").update(buffer).digest("hex");
+
+      const duplicate = await withPerson(personSlug, async (client, person) => {
+        const existing = await client.query(
+          `select d.id, d.document_type, d.title, d.file_hash, d.file_path, d.summary, d.metadata, d.created_at, r.id as report_snapshot_id
+           from documents d
+           left join report_snapshots r on r.document_id = d.id
+           where d.person_id = $1 and d.file_hash = $2
+           order by r.created_at desc nulls last
+           limit 1`,
+          [person.id, fileHash]
+        );
+        return existing.rows[0] ?? null;
+      });
+      if (duplicate) {
+        const ocrStatus = duplicate.metadata?.ocr?.status;
+        if (shouldRunOcr(ext, data.mimetype) && ocrStatus !== "completed" && duplicate.file_path) {
+          queueLocalOcrJob({
+            personSlug,
+            documentId: duplicate.id,
+            reportSnapshotId: duplicate.report_snapshot_id || undefined,
+            filePath: duplicate.file_path,
+            ext
+          });
+        }
+        const { file_path: _filePath, report_snapshot_id: _reportSnapshotId, ...safeDuplicate } = duplicate;
+        results.push({
+          ok: true,
+          status: "duplicate",
+          duplicate: true,
+          filename: originalName,
+          document: safeDuplicate,
+          ocr_status: ocrStatus || "queued"
+        });
+        continue;
+      }
+
+      const id = crypto.randomUUID();
+      const filePath = path.join(personDir, `${id}${ext}`);
+      await fs.promises.writeFile(filePath, buffer, { mode: 0o600 });
+
+      const extractedText = TEXT_UPLOAD_EXTENSIONS.has(ext) ? buffer.toString("utf8").slice(0, 200_000) : "";
+      const documentType = documentTypeForUpload(ext, data.mimetype);
+      const needsOcr = shouldRunOcr(ext, data.mimetype);
+      const initialOcrStatus = extractedText
+        ? { status: "completed", engine: "direct-text", characters: extractedText.length, completed_at: new Date().toISOString() }
+        : needsOcr
+          ? { status: "queued", engine: "tesseract-local", language: OCR_LANGUAGE, queued_at: new Date().toISOString() }
+          : { status: "not_required", engine: "none" };
+
+      const documentRecord = await withPerson(personSlug, async (client, person) => {
+        const inserted = await client.query(
+          `insert into documents (id, person_id, document_type, title, file_path, file_hash, extracted_text, summary, created_by, metadata)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, 't-per-health-ui', $9)
+           returning id, document_type, title, file_hash, summary, created_at, metadata`,
+          [
+            id,
+            person.id,
+            documentType,
+            safeTitle,
+            filePath,
+            fileHash,
+            extractedText,
+            extractedText ? "Text captured and stored. Structured lab extraction is pending n8n parser." : "File stored. Structured extraction is pending n8n parser.",
+            {
+              original_name: originalName,
+              mimetype: data.mimetype,
+              bytes: buffer.length,
+              storage: "hmdb_private_volume",
+              session_id: linkedSession?.id || null,
+              upload_mode: "multi_file",
+              ocr: initialOcrStatus
+            }
+          ]
+        );
+        const reportSnapshot = await client.query(
+          `insert into report_snapshots (person_id, document_id, session_id, source_type, report_kind, title, summary, metrics, trend, status, created_by)
+           values ($1, $2, $3, 'upload', $4, $5, $6, $7, $8, 'parser_pending', $9)
+           returning id, title, source_type, status, created_at`,
+          [
+            person.id,
+            id,
+            linkedSession?.id || null,
+            documentType,
+            safeTitle,
+            extractedText ? reportSummary(extractedText) : "Uploaded private health file. Structured extraction is pending.",
+            extractedText ? extractReportMetrics(extractedText) : {},
+            { baseline: "pending", change_signal: "awaiting_structured_parser", ocr_status: initialOcrStatus.status, ocr: initialOcrStatus },
+            session?.email || null
+          ]
+        );
+        const labPanelResult = extractedText
+          ? await upsertLabPanelFromText(client, person, id, safeTitle, extractedText, session?.email || "t-per-health-ui")
+          : null;
+        if (labPanelResult) {
+          await client.query(
+            `update report_snapshots
+             set status = 'classified',
+                 trend = coalesce(trend, '{}'::jsonb) || $3::jsonb
+             where id = $1 and person_id = $2`,
+            [
+              reportSnapshot.rows[0].id,
+              person.id,
+              {
+                structured_markers_saved: labPanelResult.markers_saved,
+                lab_panel_id: labPanelResult.lab_panel.id
+              }
+            ]
+          );
+        }
+        await client.query(
+          `insert into memory_events (person_id, source, event_type, event_title, event_body, importance, session_id, raw_delta)
+           values ($1, 't-per-health-ui', 'document_uploaded', $2, $3, 4, $4, $5)`,
+          [
+            person.id,
+            safeTitle,
+            "Private file stored in HMDB volume.",
+            linkedSession?.id || `doc-${id}`,
+            { document_id: id, file_hash: fileHash, report_snapshot_id: reportSnapshot.rows[0].id, upload_mode: "multi_file" }
+          ]
+        );
+        return {
+          ...inserted.rows[0],
+          report_snapshot: {
+            ...reportSnapshot.rows[0],
+            status: labPanelResult ? "classified" : reportSnapshot.rows[0].status,
+            structured_markers_saved: labPanelResult?.markers_saved || 0,
+            lab_panel_id: labPanelResult?.lab_panel?.id || null
+          }
+        };
+      });
+      let extraction: LabExtraction | null = null;
+      if (needsOcr && !extractedText) {
+        extraction = await extractLabsWithVision(filePath, ext, data.mimetype);
+        if (extraction && extraction.markers.length) {
+          const ex = extraction;
+          await withPerson(personSlug, async (client, person) => {
+            const saved = await upsertLabPanelFromMarkers(client, person, documentRecord.id, safeTitle, ex, session?.email || "vision-extractor");
+            await client.query(
+              `update documents set extracted_text = $3, summary = $4, metadata = coalesce(metadata, '{}'::jsonb) || $5::jsonb where id = $1 and person_id = $2`,
+              [documentRecord.id, person.id, ex.raw_text.slice(0, 200_000), `استُخرج ${saved?.markers_saved || 0} مؤشر بصرياً (${ex.model}).`,
+               { ocr: { status: "completed", engine: "vision-llm", model: ex.model, markers: saved?.markers_saved || 0, completed_at: new Date().toISOString() } }]
+            );
+            if (documentRecord.report_snapshot?.id) {
+              await client.query(
+                `update report_snapshots set status = 'classified', trend = coalesce(trend, '{}'::jsonb) || $3::jsonb where id = $1 and person_id = $2`,
+                [documentRecord.report_snapshot.id, person.id, { structured_markers_saved: saved?.markers_saved || 0, lab_panel_id: saved?.lab_panel?.id || null, extraction_engine: "vision-llm" }]
+              );
+            }
+          }).catch((e) => app.log.warn({ err: e }, "vision_save_failed"));
+        } else {
+          queueLocalOcrJob({ personSlug, documentId: documentRecord.id, reportSnapshotId: documentRecord.report_snapshot?.id, filePath, ext });
+        }
+      }
+
+      let n8n: any = {
+        status: "not_configured",
+        configured: false,
+        ok: false,
+        fallback: "saved_locally",
+        fallback_reason: "missing_N8N_DOCUMENT_INGEST_WEBHOOK",
+        n8n_status: n8nIntegrationSnapshot()
+      };
+      if (config.N8N_DOCUMENT_INGEST_WEBHOOK) {
+        try {
+          const res = await fetchWithTimeout(
+            config.N8N_DOCUMENT_INGEST_WEBHOOK,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                person_slug: personSlug,
+                document_id: id,
+                title: safeTitle,
+                file_hash: fileHash,
+                document_type: documentRecord.document_type
+              })
+            },
+            N8N_DOCUMENT_INGEST_TIMEOUT_MS
+          );
+          const parsed = await res.json().catch(() => ({ status: "non_json_response" }));
+          const parsedOk = parsed?.status !== "non_json_response";
+          n8n = {
+            ...parsed,
+            configured: true,
+            ok: res.ok && parsedOk,
+            http_status: res.status,
+            fallback: res.ok && parsedOk ? null : "saved_locally",
+            fallback_reason: res.ok && parsedOk ? null : parsedOk ? `n8n_http_${res.status}` : "n8n_non_json_response",
+            n8n_status: n8nIntegrationSnapshot()
+          };
+        } catch (error) {
+          n8n = {
+            status: "timeout_or_unavailable",
+            configured: true,
+            ok: false,
+            fallback: "saved_locally",
+            fallback_reason: "n8n_timeout_or_unavailable",
+            n8n_status: n8nIntegrationSnapshot()
+          };
+        }
+      }
+
+      results.push({ ok: true, status: "saved", duplicate: false, filename: originalName, document: documentRecord, ocr_status: extraction && extraction.markers.length ? "completed" : initialOcrStatus.status, n8n, extraction: extraction && extraction.markers.length ? { markers: extraction.markers, panel_date: extraction.panel_date, lab_name: extraction.lab_name, model: extraction.model } : null });
+    } catch (error) {
+      results.push({
+        ok: false,
+        status: "failed",
+        filename: originalName,
+        error: error instanceof Error ? error.message : "upload_failed"
+      });
+    }
+  }
+
+  if (!results.length) return reply.code(400).send({ error: "file_required" });
+  const failed = results.filter((item) => item.status === "failed").length;
+  const saved = results.filter((item) => item.status === "saved").length;
+  const duplicates = results.filter((item) => item.status === "duplicate").length;
+  return {
+    ok: failed === 0,
+    total: results.length,
+    saved,
+    duplicates,
+    failed,
+    results
+  };
+});
+
+app.get("/v1/persons", { preHandler: requireHmdbSecret }, async () => {
+  const result = await pool.query(
+    "select slug, display_label, relation_label, status, created_at from health_memory.persons where status = 'active' order by created_at"
+  );
+  return { persons: result.rows };
+});
+
+app.get("/v1/persons/:slug/context", { preHandler: requireHmdbSecret }, async (request) => {
+  const slug = z.object({ slug: z.string().regex(/^[a-z0-9-]+$/) }).parse(request.params).slug;
+  return withPerson(slug, async (client, person) => {
+    try {
+      await client.query("savepoint context_backfill");
+      await backfillStructuredLabMarkers(client, person);
+      await client.query("release savepoint context_backfill");
+    } catch {
+      await client.query("rollback to savepoint context_backfill").catch(() => undefined);
+      await client.query("release savepoint context_backfill").catch(() => undefined);
+    }
+    const [conditions, medications, supplements, redLines, latestLabs, labMarkers, symptoms, decisions, documents, reports] = await Promise.all([
+      client.query("select condition_name as name, status, notes from medical_conditions where person_id = $1 order by created_at desc limit 20", [person.id]),
+      client.query("select medication_name as name, dose, frequency, timing, notes, status from medications where person_id = $1 and status = 'active' order by created_at desc", [person.id]),
+      client.query("select supplement_name as name, dose, frequency, timing, reason, safety_status, status from supplements where person_id = $1 and status in ('active','trial') order by created_at desc", [person.id]),
+      client.query("select rule_code as code, rule_title as title, rule_body as body, severity from red_lines where person_id = $1 and status = 'active' order by rule_code", [person.id]),
+      client.query("select id, panel_date, lab_name, summary, created_at from lab_panels where person_id = $1 order by panel_date desc nulls last, created_at desc limit 3", [person.id]),
+      client.query(
+        `select m.marker_name, m.value_text, m.value_numeric, m.unit, m.reference_range, m.flag, m.created_at, p.panel_date, p.lab_name
+         from lab_markers m
+         join lab_panels p on p.id = m.lab_panel_id
+         where m.person_id = $1
+         order by coalesce(p.panel_date, m.created_at::date) desc, m.created_at desc
+         limit 80`,
+        [person.id]
+      ),
+      client.query("select symptom_name as name, severity, started_at, context, created_at from symptoms_log where person_id = $1 order by created_at desc limit 20", [person.id]),
+      client.query("select decision_title as title, decision_body as body, evidence_tier, created_at from decisions_log where person_id = $1 order by created_at desc limit 15", [person.id]),
+      client.query("select id, title, document_type, summary, created_at from documents where person_id = $1 and coalesce(metadata->>'qa_hidden', 'false') <> 'true' order by created_at desc limit 10", [person.id]),
+      client.query("select id, title, source_type, report_kind, summary, metrics, status, created_at from report_snapshots where person_id = $1 and coalesce(trend->>'qa_hidden', 'false') <> 'true' order by created_at desc limit 10", [person.id])
+    ]);
+    return {
+      person,
+      active_conditions: conditions.rows,
+      current_medications: medications.rows,
+      current_supplements: supplements.rows,
+      active_red_lines: redLines.rows,
+      latest_labs: latestLabs.rows,
+      latest_lab_markers: labMarkers.rows,
+      lab_trends: buildLabTrends(labMarkers.rows),
+      recent_symptoms: symptoms.rows,
+      recent_decisions: decisions.rows,
+      recent_documents: documents.rows,
+      recent_reports: reports.rows,
+      context_generated_at: new Date().toISOString()
+    };
+  });
+});
+
+app.post("/v1/webhook-auth/check", { preHandler: requireHmdbSecret }, async (request) => {
+  const body = z.object({ supplied_secret: z.string().optional() }).parse(request.body ?? {});
+  const expected = config.N8N_HEALTH_COMMITTEE_SECRET || "";
+  const ok = Boolean(expected && body.supplied_secret && timingSafeStringEqual(body.supplied_secret, expected));
+  return { ok };
+});
+
+app.post("/v1/committee/evaluate", { preHandler: requireHmdbSecret }, async (request) => {
+  const body = z
+    .object({
+      person_slug: z.string().regex(/^[a-z0-9-]+$/),
+      session_id: z.string().min(1).max(120),
+      user_message: z.string().trim().min(1).max(6000),
+      source: z.string().default("n8n-health-committee")
+    })
+    .parse(request.body);
+  await withPerson(body.person_slug, async (client, person) => {
+    await client.query(
+      `insert into memory_events (person_id, source, event_type, event_title, event_body, importance, session_id, raw_delta)
+       values ($1, 'n8n-health-committee', 'committee_input', 'Committee input accepted', $2, 2, $3, $4)`,
+      [person.id, body.user_message, body.session_id, { source: body.source }]
+    );
+  });
+  const snapshot = await buildHealthSnapshot(body.person_slug).catch(() => null);
+  const result = deterministicCommittee(body.person_slug, body.session_id, body.user_message, snapshot);
+  await saveCommitteeResult(body.person_slug, body.session_id, result);
+  return result;
+});
+
+app.post("/v1/persons/:slug/memory-delta", { preHandler: requireHmdbSecret }, async (request) => {
+  const slug = z.object({ slug: z.string().regex(/^[a-z0-9-]+$/) }).parse(request.params).slug;
+  const body = z
+    .object({
+      event_type: z.string().min(1).max(80).default("memory_delta"),
+      event_title: z.string().max(160).optional(),
+      event_body: z.string().max(10_000).optional(),
+      session_id: z.string().max(120).optional(),
+      importance: z.number().int().min(1).max(5).default(3),
+      raw_delta: z.record(z.string(), z.unknown()).default({})
+    })
+    .parse(request.body ?? {});
+  return withPerson(slug, async (client, person) => {
+    const result = await client.query(
+      `insert into memory_events (person_id, source, event_type, event_title, event_body, importance, session_id, raw_delta)
+       values ($1, 'hmdb-api', $2, $3, $4, $5, $6, $7)
+       returning id, event_type, event_title, created_at`,
+      [person.id, body.event_type, body.event_title || null, body.event_body || null, body.importance, body.session_id || null, body.raw_delta]
+    );
+    return { ok: true, memory_event: result.rows[0] };
+  });
+});
+
+app.post("/v1/persons/:slug/document", { preHandler: requireHmdbSecret }, async (request) => {
+  const slug = z.object({ slug: z.string().regex(/^[a-z0-9-]+$/) }).parse(request.params).slug;
+  const body = z
+    .object({
+      document_type: z.string().max(80).default("uploaded_file"),
+      title: z.string().max(180),
+      file_hash: z.string().max(160).optional(),
+      extracted_text: z.string().max(200_000).optional(),
+      summary: z.string().max(5000).optional(),
+      metadata: z.record(z.string(), z.unknown()).default({})
+    })
+    .parse(request.body ?? {});
+  return withPerson(slug, async (client, person) => {
+    const result = await client.query(
+      `insert into documents (person_id, document_type, title, file_hash, extracted_text, summary, created_by, metadata)
+       values ($1, $2, $3, $4, $5, $6, 'hmdb-api', $7)
+       returning id, document_type, title, file_hash, summary, created_at`,
+      [person.id, body.document_type, body.title, body.file_hash || null, body.extracted_text || "", body.summary || null, body.metadata]
+    );
+    return { ok: true, document: result.rows[0] };
+  });
+});
+
+app.post("/v1/persons/:slug/lab-panel", { preHandler: requireHmdbSecret }, async (request) => {
+  const slug = z.object({ slug: z.string().regex(/^[a-z0-9-]+$/) }).parse(request.params).slug;
+  const body = z
+    .object({
+      panel_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      lab_name: z.string().max(160).optional(),
+      source_document_id: z.string().uuid().optional(),
+      summary: z.string().max(5000).optional(),
+      markers: z
+        .array(
+          z.object({
+            marker_name: z.string().max(120),
+            value_text: z.string().max(120).optional(),
+            value_numeric: z.number().optional(),
+            unit: z.string().max(40).optional(),
+            reference_range: z.string().max(120).optional(),
+            flag: z.enum(["low", "normal", "high", "critical", "out_of_range"]).optional(),
+            interpretation: z.string().max(1000).optional()
+          })
+        )
+        .default([])
+    })
+    .parse(request.body ?? {});
+  return withPerson(slug, async (client, person) => {
+    const panel = await client.query(
+      `insert into lab_panels (person_id, panel_date, lab_name, source_document_id, summary, created_by)
+       values ($1, $2, $3, $4, $5, 'hmdb-api')
+       returning id, panel_date, lab_name, summary, created_at`,
+      [person.id, body.panel_date || null, body.lab_name || null, body.source_document_id || null, body.summary || null]
+    );
+    for (const marker of body.markers) {
+      await client.query(
+        `insert into lab_markers (lab_panel_id, person_id, marker_name, value_text, value_numeric, unit, reference_range, flag, interpretation, created_by)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'hmdb-api')`,
+        [
+          panel.rows[0].id,
+          person.id,
+          marker.marker_name,
+          marker.value_text || null,
+          marker.value_numeric ?? null,
+          marker.unit || null,
+          marker.reference_range || null,
+          marker.flag || null,
+          marker.interpretation || null
+        ]
+      );
+    }
+    return { ok: true, lab_panel: panel.rows[0], markers_saved: body.markers.length };
+  });
+});
+
+app.post("/v1/persons/:slug/export", { preHandler: requireHmdbSecret }, async (request) => {
+  const slug = z.object({ slug: z.string().regex(/^[a-z0-9-]+$/) }).parse(request.params).slug;
+  const body = z.object({ export_type: z.enum(["state", "labs_summary", "protocol", "decisions"]).default("state") }).parse(request.body ?? {});
+  const context = await withPerson(slug, async (_client) => app.inject({ method: "GET", url: `/v1/persons/${slug}/context`, headers: { "x-hmdb-secret": config.HMDB_API_SECRET } }));
+  const payload = JSON.parse(context.payload);
+  const content = `# T-PER Health Export\n\nGenerated: ${new Date().toISOString()}\n\n\`\`\`json\n${JSON.stringify(payload, null, 2)}\n\`\`\`\n`;
+  const personDir = path.join(config.HMDB_EXPORT_DIR, slug);
+  await fs.promises.mkdir(personDir, { recursive: true, mode: 0o700 });
+  const filePath = path.join(personDir, `${body.export_type}-${Date.now()}.md`);
+  await fs.promises.writeFile(filePath, content, { mode: 0o600 });
+  const contentHash = crypto.createHash("sha256").update(content).digest("hex");
+  return withPerson(slug, async (client, person) => {
+    const result = await client.query(
+      `insert into generated_exports (person_id, export_type, file_path, content_hash, metadata)
+       values ($1, $2, $3, $4, $5)
+       returning id, export_type, file_path, content_hash, generated_at`,
+      [person.id, body.export_type, filePath, contentHash, { generated_by: "hmdb-api" }]
+    );
+    return { ok: true, export: result.rows[0] };
+  });
+});
+
+app.get("/v1/persons/:slug/search", { preHandler: requireHmdbSecret }, async (request) => {
+  const slug = z.object({ slug: z.string().regex(/^[a-z0-9-]+$/) }).parse(request.params).slug;
+  const query = z.object({ q: z.string().min(1).max(200) }).parse(request.query);
+  return withPerson(slug, async (client, person) => {
+    const like = `%${query.q}%`;
+    const [documents, memory] = await Promise.all([
+      client.query(
+        `select id, title, document_type, summary, created_at
+         from documents
+         where person_id = $1
+           and coalesce(metadata->>'qa_hidden', 'false') <> 'true'
+           and (title ilike $2 or extracted_text ilike $2 or summary ilike $2)
+         order by created_at desc
+         limit 10`,
+        [person.id, like]
+      ),
+      client.query(
+        `select id, event_type, event_title, event_body, created_at
+         from memory_events
+         where person_id = $1
+           and coalesce(raw_delta->>'qa_hidden', 'false') <> 'true'
+           and (event_title ilike $2 or event_body ilike $2)
+         order by created_at desc
+         limit 10`,
+        [person.id, like]
+      )
+    ]);
+    return { documents: documents.rows, memory_events: memory.rows };
+  });
+});
+
+app.addHook("onResponse", async (request, reply) => {
+  if (request.url.startsWith("/healthz")) return;
+  const endpoint = request.url.split("?")[0] || request.url;
+  pool
+    .query(
+      `insert into health_memory.api_audit_log (request_id, person_slug, endpoint, method, status_code, ip_address, user_agent, duration_ms, metadata)
+       values ($1, $2, $3, $4, $5, nullif($6, '')::inet, $7, $8, $9)`,
+      [
+        request.id,
+        config.HMDB_DEFAULT_PERSON_SLUG,
+        endpoint,
+        request.method,
+        reply.statusCode,
+        requestIp(request) || "",
+        request.headers["user-agent"] || "",
+        Math.round(reply.elapsedTime),
+        { service: "T-PER-HMDB-API" }
+      ]
+    )
+    .catch((auditError: unknown) => request.log.warn({ err: auditError }, "audit_log_write_failed"));
+});
+
+await runMigrations().catch((error: unknown) => app.log.error({ err: error }, "migrations_failed"));
+await ensureConfiguredAdminUsers();
+await ensureAboTalalUser();
+await app.listen({ host: "0.0.0.0", port: config.PORT });

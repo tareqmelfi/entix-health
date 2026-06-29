@@ -1,0 +1,16 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+.env
+.env.*
+# legacy / cruft (never ship)
+.netlify/
+public/.netlify/
+_legacy-frontend/
+public/App.js
+public/Styles.css
+public/assets/
+public/99-Archive/
+src/99-Archive/
+Migrations/
