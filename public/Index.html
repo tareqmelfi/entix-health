@@ -53,6 +53,14 @@ body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-
 .kicker-en{color:var(--dim);font-weight:700;font-size:11px;letter-spacing:.3px}
 .rxlist{display:flex;flex-direction:column;gap:12px;margin-top:8px}
 .rxcard{border:1px solid var(--line);border-radius:var(--r3);padding:16px 18px;background:#fff}
+.rxcard.rx-good{border-inline-start:3px solid #22c55e}
+.rxcard.rx-warning{border-inline-start:3px solid #f59e0b}
+.rxcard.rx-info{border-inline-start:3px solid var(--violet)}
+.rxstat{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:800;padding:4px 10px;border-radius:100px}
+.rxstat .bdot{width:6px;height:6px;border-radius:50%;background:currentColor}
+.rxstat.good{background:#dcfce7;color:#166534}
+.rxstat.warning{background:#ffedd4;color:#9a3412}
+.rxstat.info{background:var(--violet-soft);color:var(--violet)}
 .rxtop{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
 .rxname{font-size:15.5px;font-weight:800;color:var(--ink)}
 .rxdose{background:var(--violet-soft);color:var(--violet);font-weight:800;font-size:11.5px;padding:4px 11px;border-radius:8px}
@@ -237,7 +245,8 @@ body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-
 </defs></svg>
 
 <!-- LANDING -->
-<section id="landing">
+<div id="splash" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#f8fafc;z-index:9999"><div style="font-family:'Plus Jakarta Sans',sans-serif;font-weight:800;font-size:24px;letter-spacing:.01em"><span style="color:#1e3a8a">ENTIX</span><span style="color:#2563eb">·HEALTH</span></div></div>
+<section id="landing" class="hidden">
   <nav class="lnav">
     <div class="brand"><span class="bx">ENTIX</span><span class="bd">·</span><span class="bh">HEALTH</span></div>
     <button class="nbtn" onclick="enterApp()">دخول</button>
@@ -352,9 +361,10 @@ async function logout(){await api("/api/logout",{method:"POST"});showLanding()}
 function enterApp(m){if(STATE.authed){show(true);route()}else showAuth(m)}
 function lp(id){const d=document.getElementById(id);if(d){d.open=true;d.scrollIntoView({behavior:"smooth",block:"center"})}return false}
 async function boot(){const r=await api("/api/bootstrap");if(!r.ok){showLanding();return}STATE.user=r.data;STATE.authed=true;const em=(r.data&&(r.data.email||(r.data.user&&r.data.user.email)))||"T";document.getElementById("avatar").textContent=(em[0]||"T").toUpperCase();if(location.hash==="#home"){showLanding();return}show(true);route()}
-function showLanding(){document.getElementById("landing").classList.remove("hidden");document.getElementById("auth").classList.add("hidden");document.getElementById("app").classList.add("hidden")}
-function showAuth(m){if(m)setMode(m);document.getElementById("landing").classList.add("hidden");document.getElementById("auth").classList.remove("hidden");document.getElementById("app").classList.add("hidden")}
-function show(li){document.getElementById("landing").classList.add("hidden");document.getElementById("auth").classList.toggle("hidden",li);document.getElementById("app").classList.toggle("hidden",!li)}
+function killSplash(){var s=document.getElementById("splash");if(s)s.remove()}
+function showLanding(){killSplash();document.getElementById("landing").classList.remove("hidden");document.getElementById("auth").classList.add("hidden");document.getElementById("app").classList.add("hidden")}
+function showAuth(m){killSplash();if(m)setMode(m);document.getElementById("landing").classList.add("hidden");document.getElementById("auth").classList.remove("hidden");document.getElementById("app").classList.add("hidden")}
+function show(li){killSplash();document.getElementById("landing").classList.add("hidden");document.getElementById("auth").classList.toggle("hidden",li);document.getElementById("app").classList.toggle("hidden",!li)}
 function go(id,el){location.hash="#"+id;document.querySelectorAll(".screen").forEach(s=>s.classList.remove("on"));document.getElementById(id).classList.add("on");document.querySelectorAll(".rail .ic").forEach(b=>b.classList.toggle("on",b.dataset.s===id));if(id==="dash")loadDash();if(id==="council")loadCouncil();if(id==="reports")loadReports();if(id==="protocol")loadProtocol();}
 function route(){const h=(location.hash||"#dash").replace("#","");go(["dash","council","protocol","reports"].includes(h)?h:"dash")}
 
@@ -445,8 +455,8 @@ function flagLabel(f){f=(f||"").toLowerCase();return f==="critical"?"حرِج":f
 function flagStyle(f){f=(f||"").toLowerCase();if(f==="critical")return{bg:"#fee2e2",fg:"#b91c1c",dot:"#ef4444"};if(f==="high"||f==="low"||f==="abnormal")return{bg:"#ffedd5",fg:"#c2410c",dot:"#f97316"};if(f==="normal")return{bg:"#dcfce7",fg:"#15803d",dot:"#22c55e"};return{bg:"#f1f5f9",fg:"#64748b",dot:"#cbd5e1"}}
 function flagCls(f){f=(f||"").toLowerCase();return f==="critical"?"danger":(f==="low"||f==="high"||f==="abnormal")?"warning":f==="normal"?"normal":""}
 function valCol(f){f=(f||"").toLowerCase();return f==="critical"?"var(--alert)":(f==="low"||f==="high"||f==="abnormal")?"var(--watch)":f==="normal"?"var(--good)":"var(--ink)"}
-function rangeBar(num,range){if(num==null||!range)return"";const m=String(range).match(/(-?\d+(?:\.\d+)?)\s*[-–—]\s*(-?\d+(?:\.\d+)?)/);if(!m)return"";let lo=parseFloat(m[1]),hi=parseFloat(m[2]);if(hi<lo){const t=lo;lo=hi;hi=t}if(hi<=lo)return"";let p=((num-lo)/(hi-lo))*100;p=Math.max(2,Math.min(98,p));return `<div class="rbar"><span class="rbar-m" style="left:${p}%"></span></div>`}
-function mtRow(it){const cls=flagCls(it.flag);const stat=it.slabel||flagLabel(it.flag);const name=it.ar?`<span class="mt-name">${esc(it.ar)}</span> <span class="mt-en">${it.en?"("+esc(it.en)+")":""}</span>`:`<span class="mt-name">${esc(it.en||"—")}</span>`;const exp=it.explain?`<div class="mt-exp">${esc(it.explain)}</div>`:"";const exl=it.exl?`<div class="mt-exl">${esc(it.exl)}</div>`:"";return `<tr><td>${name}${exp}${exl}</td><td class="mt-val" style="color:${valCol(it.flag)}">${esc(String(it.val==null?"—":it.val))}${it.unit?` <span class="mt-u">${esc(it.unit)}</span>`:""}</td><td class="mt-range">${esc(it.range||"—")}${rangeBar(it.num,it.range)}</td><td><span class="badge2 ${cls}"><span class="bdot"></span>${esc(stat)}</span></td></tr>`}
+function rangeBar(num,range,flag){var lo=null,hi=null;if(range){var s=String(range);var m=s.match(/(-?\d+(?:\.\d+)?)\s*(?:-|–|—|to|الى|إلى)\s*(-?\d+(?:\.\d+)?)/i);if(m){lo=parseFloat(m[1]);hi=parseFloat(m[2])}else{var g=s.match(/[<≤]\s*(-?\d+(?:\.\d+)?)/);var l=s.match(/[>≥]\s*(-?\d+(?:\.\d+)?)/);if(g){lo=0;hi=parseFloat(g[1])}else if(l){lo=parseFloat(l[1]);hi=lo*2}}if(lo!=null&&hi!=null&&hi<lo){var t=lo;lo=hi;hi=t}}var p,zone;if(num!=null&&lo!=null&&hi!=null&&hi>lo){p=((num-lo)/(hi-lo))*100;if(p<0||p>100){zone="out"}else{var e=Math.min(p,100-p);zone=e<14?"edge":"mid"}p=Math.max(3,Math.min(97,p))}else{var f=(flag||"").toLowerCase();p=f==="critical"?95:(f==="high"||f==="abnormal")?85:f==="low"?13:50;zone=(f===""||f==="normal")?"mid":"out"}var col=zone==="mid"?"#16a34a":zone==="edge"?"#c2410c":"#dc2626";return `<div class="rbar"><span class="rbar-m" style="left:`+p+`%;border-color:`+col+`"></span></div>`}
+function mtRow(it){const cls=flagCls(it.flag);const stat=it.slabel||flagLabel(it.flag);const name=it.ar?`<span class="mt-name">${esc(it.ar)}</span> <span class="mt-en">${it.en?"("+esc(it.en)+")":""}</span>`:`<span class="mt-name">${esc(it.en||"—")}</span>`;const exp=it.explain?`<div class="mt-exp">${esc(it.explain)}</div>`:"";const exl=it.exl?`<div class="mt-exl">${esc(it.exl)}</div>`:"";return `<tr><td>${name}${exp}${exl}</td><td class="mt-val" style="color:${valCol(it.flag)}">${esc(String(it.val==null?"—":it.val))}${it.unit?` <span class="mt-u">${esc(it.unit)}</span>`:""}</td><td class="mt-range">${esc(it.range||"—")}${rangeBar(it.num,it.range,it.flag)}</td><td><span class="badge2 ${cls}"><span class="bdot"></span>${esc(stat)}</span></td></tr>`}
 function modernTable(items){return `<div class="mt-wrap"><table class="mt"><thead><tr><th>المؤشر (Test Name)</th><th>النتيجة (Result)</th><th>المرجع (Range)</th><th>الحالة (Status)</th></tr></thead><tbody>${items.map(mtRow).join("")}</tbody></table></div>`}
 function labTable(markers,title){const items=markers.map(m=>({ar:m.name_ar,en:m.marker_name,val:(m.value_text!=null?m.value_text:m.value_numeric),num:m.value_numeric,unit:m.unit,range:m.reference_range,flag:m.flag,slabel:m.status_label,explain:m.explain,exl:(m.explain_long||"")}));const ab=markers.filter(m=>m.flag&&["high","low","critical","abnormal"].includes((m.flag||"").toLowerCase())).length;
  return `<div class="labt"><div class="labt-h2"><h3 class="labt-t2">ملخص نتائج التحليل المرفق</h3><p class="labt-sub2">${title?esc(title)+" · ":""}${markers.length} مؤشر · ${ab?`<b style="color:var(--watch)">${ab} يستدعي الانتباه</b>`:`<b style="color:var(--good)">الكل ضمن النطاق</b>`}</p></div>${modernTable(items)}</div>`}
@@ -487,7 +497,7 @@ async function loadProtocol(){const v=document.getElementById("protocol");v.inne
  const sch=(p.schedule||[]).filter(s=>s.items&&s.items.length);
  const meds=p.medications||[],supps=p.supplements||[],inter=p.interactions||[],reds=p.red_lines||[];
  const hasAny=meds.length||supps.length;
- const rx=(m,why)=>`<div class="rxcard"><div class="rxtop"><b class="rxname">${esc(m.name||"-")}</b>${m.dose?`<span class="rxdose">${esc(m.dose)}</span>`:""}${m.timing?`<span class="rxtime">${esc(m.timing)}</span>`:""}</div>${why?`<p class="rxwhy"><span class="rxwhy-l">السبب والتعليمات</span> ${esc(why)}</p>`:`<p class="rxwhy rxwhy-empty">${esc([m.frequency,m.timing].filter(Boolean).join(" · ")||"بدون ملاحظات")}</p>`}</div>`;
+ const rxStat=(m,why)=>{var t=((why||"")+" "+(m.name||"")+" "+(m.notes||"")+" "+(m.reason||"")).toLowerCase();if(/lock|مقفل|no escalation|sign-off|locked/.test(t))return{c:"warning",t:"مقفل · لا تصعيد"};if(/gap|مباعد|spac|hours apart|بعيد|4-6h|4h|away from/.test(t))return{c:"info",t:"مباعدة دوائية"};return{c:"good",t:"نشط"}};const rx=(m,why)=>`<div class="rxcard rx-${rxStat(m,why).c}"><div class="rxtop"><b class="rxname">${esc(m.name||"-")}</b>${m.dose?`<span class="rxdose">${esc(m.dose)}</span>`:""}${m.timing?`<span class="rxtime">${esc(m.timing)}</span>`:""}<span class="rxstat ${rxStat(m,why).c}"><span class="bdot"></span>${rxStat(m,why).t}</span></div>${why?`<p class="rxwhy"><span class="rxwhy-l">السبب والتعليمات</span> ${esc(why)}</p>`:`<p class="rxwhy rxwhy-empty">${esc([m.frequency,m.timing].filter(Boolean).join(" · ")||"بدون ملاحظات")}</p>`}</div>`;
  v.innerHTML=`
   <div class="head"><div>
    <p class="eyebrow"><svg class="ico"><use href="#i-pill"/></svg> VITA · PERSONAL TREATMENT PROTOCOL</p>

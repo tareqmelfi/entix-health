@@ -2465,6 +2465,24 @@ app.get("/api/protocol", { preHandler: requireSession }, async (request) => {
   });
 });
 
+// Admin-only: wipe this person's uploaded lab data (panels/markers/reports/documents)
+// so they can re-upload fresh. Protocol (meds/supplements/conditions) is preserved.
+app.post("/api/health-data/reset", { preHandler: requireSession }, async (request, reply) => {
+  const session = currentSession(request);
+  const email = (session?.email || "").toLowerCase();
+  if (!adminEmails.has(email)) return reply.code(403).send({ ok: false, error: "forbidden" });
+  return withPerson(session?.slug || config.HMDB_DEFAULT_PERSON_SLUG, async (client, person) => {
+    const deleted: Record<string, number> = {};
+    const r1 = await client.query("delete from report_snapshots where person_id = $1", [person.id]);
+    deleted.report_snapshots = r1.rowCount || 0;
+    const r2 = await client.query("delete from lab_panels where person_id = $1", [person.id]);
+    deleted.lab_panels = r2.rowCount || 0; // cascades lab_markers
+    const r3 = await client.query("delete from documents where person_id = $1", [person.id]);
+    deleted.documents = r3.rowCount || 0;
+    return { ok: true, reset: true, deleted };
+  });
+});
+
 app.post("/api/chat", { preHandler: requireSession }, async (request, reply) => {
   const body = z
     .object({
