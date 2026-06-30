@@ -216,6 +216,42 @@ body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-
 @media(max-width:820px){.bento{grid-template-columns:1fr 1fr}.bcard.feat{grid-row:auto}}
 @media(max-width:700px){.hero h1{font-size:38px}.hero{padding:40px 22px}.bento{grid-template-columns:1fr}.bcard.wide,.bcard.feat{grid-column:auto;grid-row:auto}}
 @media(max-width:900px){.main{padding:18px}.two,.two2{grid-template-columns:1fr}.metrics{grid-template-columns:1fr}.cglass{grid-template-columns:1fr}.cside{display:none}.h1{font-size:30px}.rail{width:62px}#council.on{height:calc(100vh - 80px)}}
+
+.adh{text-align:left}.adh-l{font-size:11px;color:var(--muted);display:block}.adh-v{font-size:21px;font-weight:800;color:var(--violet)}
+.ptoggle{display:inline-flex;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:4px;gap:4px;margin:6px 0 20px}
+.ptoggle button{border:none;background:transparent;color:var(--muted);font-weight:700;font-size:13px;padding:9px 18px;border-radius:9px;cursor:pointer;font-family:inherit}
+.ptoggle button.on{background:#fff;color:var(--ink);box-shadow:0 1px 4px rgba(15,23,42,.08)}
+.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.pcard{border:1px solid var(--line);border-radius:16px;padding:18px 20px;background:#fff}
+.pc-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:14px}
+.pc-name{font-size:16px;font-weight:800;color:var(--ink)}.pc-sub{font-size:12.5px;color:var(--muted);margin-top:3px}
+.pc-cat{font-size:11px;font-weight:800;padding:5px 11px;border-radius:100px;white-space:nowrap}
+.pc-cat.med{background:#dcfce7;color:#166534}.pc-cat.supp{background:var(--violet-soft);color:var(--violet)}
+.pc-meta{display:grid;grid-template-columns:1fr 1fr;gap:10px;background:var(--bg);border-radius:11px;padding:12px 14px}
+.pc-meta .pc-l{font-size:11px;color:var(--muted);display:block;margin-bottom:3px}.pc-meta b{font-size:13px;color:var(--ink)}
+.pc-why{font-size:12.5px;color:#334155;line-height:1.7;margin:12px 0 0}
+.pc-alert{display:flex;gap:9px;background:#fff7ed;border:1px solid #fed7aa;border-radius:11px;padding:11px 13px;margin-top:12px;color:#9a3412}
+.pc-alert .ico{width:17px;height:17px;flex:none;margin-top:2px}.pc-alert b{font-size:12.5px}.pc-alert p{font-size:12px;margin:3px 0 0;line-height:1.6}
+.ptl-slot{margin-bottom:22px}
+.ptl-head{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.ptl-dot{width:14px;height:14px;border-radius:50%;background:var(--violet);flex:none;box-shadow:0 0 0 4px var(--violet-soft)}
+.ptl-head b{font-size:15px;color:var(--ink)}.ptl-hsub{font-size:12px;color:var(--muted)}
+.ptl-list{display:flex;flex-direction:column;gap:10px;padding-right:26px}
+.ptl-card{display:flex;align-items:center;gap:13px;border:1px solid var(--line);border-radius:13px;padding:14px 16px;background:#fff;cursor:pointer;transition:.15s}
+.ptl-card:hover{border-color:var(--violet)}
+.ptl-card.done{background:#f0fdf4;border-color:#bbf7d0}
+.ptl-ck{width:26px;height:26px;border-radius:50%;border:2px solid var(--line);flex:none;display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;font-weight:800}
+.ptl-card.done .ptl-ck{background:#22c55e;border-color:#22c55e}
+.ptl-card b{font-size:14px;color:var(--ink)}.ptl-sub{font-size:12px;color:var(--muted);margin-top:2px}
+.rep-score{background:var(--navy,#0a192f);border-radius:16px;padding:24px 26px;display:flex;gap:26px;align-items:center;flex-wrap:wrap}
+.rep-gauge .g-n{fill:#fff;font-size:30px;font-weight:800}.rep-gauge .g-u{fill:#94a3b8;font-size:10px}
+.rep-h2{font-size:18px;font-weight:800;color:#fff}
+.rep-grade{background:#1e3a8a;color:#bfdbfe;font-weight:800;font-size:13px;padding:3px 11px;border-radius:8px}
+.rep-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:14px}
+.rep-stat{background:#0f1f3a;border-radius:11px;padding:12px}.rep-stat .n{font-size:19px;font-weight:800;color:#fff}.rep-stat .l{font-size:10px;color:#94a3b8;margin-top:2px}
+.rep-foot{margin-top:18px;padding-top:14px;border-top:1px solid var(--line);font-size:11.5px;color:#94a3b8}
+@media print{.rail,.lnav,.ptoggle,.phead-r,#rinp,.btn,.printbtn{display:none!important}body,.app{background:#fff!important}.screen{padding:0!important}.pcard,.ptl-card,.rep-score,tr{break-inside:avoid}}
+
 </style>
 </head>
 <body>
@@ -482,36 +518,58 @@ async function sendMsg(){if(STATE.busy)return;const t=document.getElementById("c
 window.addEventListener("DOMContentLoaded",()=>{const box=document.getElementById("cbox");if(box){["dragover","dragenter"].forEach(e=>box.addEventListener(e,ev=>{ev.preventDefault();box.classList.add("drag")}));["dragleave","drop"].forEach(e=>box.addEventListener(e,ev=>{ev.preventDefault();box.classList.remove("drag")}));box.addEventListener("drop",ev=>{if(ev.dataTransfer.files.length)addFiles(ev.dataTransfer.files)})}});
 
 /* REPORTS */
-async function loadReports(){const v=document.getElementById("reports");v.innerHTML='<div class="empty">جارٍ التحميل…</div>';const r=await api("/api/dashboard");const d=(r.data)||{};const docs=(d.documents||[]).concat(d.reports||[]);
- v.innerHTML=`<p class="eyebrow"><svg class="ico"><use href="#i-report"/></svg> VITA · MEDICAL RECORD</p><h1 class="h1" style="font-size:38px">التقارير والتحاليل</h1>
-  <div class="subline" style="margin-bottom:22px">ارفع تقارير المختبر (أي صيغة) ونستخرج المؤشرات تلقائياً عبر OCR.</div>
-  <div class="cardp" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;margin-bottom:18px"><div><b style="font-size:16px">رفع تقرير جديد</b><div style="color:var(--muted);font-size:13px;margin-top:5px">PDF · صور · TXT · CSV · أي ملف</div></div>
-   <button class="btn" style="width:auto;padding:13px 26px" onclick="document.getElementById('rinp').click()">اختر ملف</button>
-   <input type="file" id="rinp" class="hidden" multiple onchange="upReport(this.files)"></div>
-  ${docs.length?docs.slice(0,40).map(x=>`<div class="row"><span class="pill p-good">${esc((x.document_type||x.report_kind||"FILE").toUpperCase().slice(0,10))}</span><div><b>${esc(x.title||"تقرير")}</b><div style="color:var(--muted);font-size:13px;margin-top:4px">${esc((x.summary||"").slice(0,150))}</div></div></div>`).join(""):'<div class="empty">ما فيه تقارير بعد — ابدأ برفع أول تقرير.</div>'}`;}
+function scoreFrom(sigs){var meas=sigs.filter(function(s){return s.flag||s.status});var tot=meas.length;if(!tot)return{score:null,grade:"—",norm:0,watch:0,alert:0,tot:0};var alert=0,watch=0,norm=0;meas.forEach(function(s){var f=((s.flag||s.status)||"").toLowerCase();if(f==="critical"){alert++}else if(f==="high"||f==="low"||f==="abnormal"||f==="out_of_range"){watch++}else{norm++}});var raw=(norm*1.0+watch*0.55+alert*0.15)/tot;var score=Math.round(Math.max(0.35,Math.min(0.99,raw))*100);var grade=score>=85?"A":score>=70?"B":score>=55?"C":"D";return{score:score,grade:grade,norm:norm,watch:watch,alert:alert,tot:tot};}
+function gaugeSVG(score){if(score==null)return"";var c=2*Math.PI*52;var off=c*(1-score/100);return '<svg viewBox="0 0 120 120" width="118" height="118"><circle cx="60" cy="60" r="52" fill="none" stroke="#1e293b" stroke-width="11"/><circle cx="60" cy="60" r="52" fill="none" stroke="#2563eb" stroke-width="11" stroke-linecap="round" stroke-dasharray="'+c.toFixed(1)+'" stroke-dashoffset="'+off.toFixed(1)+'" transform="rotate(-90 60 60)"/><text x="60" y="56" text-anchor="middle" class="g-n">'+score+'</text><text x="60" y="74" text-anchor="middle" class="g-u">من 100</text></svg>';}
+function printReport(){window.print();}
+async function loadReports(){const v=document.getElementById("reports");v.innerHTML='<div class="empty">جارٍ التحميل…</div>';
+ const r=await api("/api/dashboard");const d=(r.data)||{};
+ const sigs=(d.health_signals||[]).map(function(s){return {label:s.label,num:s.latest_numeric,val:(s.latest_numeric!=null?s.latest_numeric:s.latest_value),unit:s.unit,range:s.reference_range,flag:s.status,slabel:s.status_label,exp:s.summary,exl:s.interpretation};});
+ const meas=sigs.filter(function(s){return s.num!=null||(s.val!=null&&String(s.val).trim())});
+ const sc=scoreFrom(sigs);
+ const docs=(d.documents||[]).concat(d.reports||[]);
+ const plan=(d.medications||[]).concat(d.supplements||[]).slice(0,6);
+ const repCore=meas.length?('<div class="rep-score"><div class="rep-gauge">'+gaugeSVG(sc.score)+'</div><div style="flex:1;min-width:230px"><div style="display:flex;align-items:center;gap:10px"><h2 class="rep-h2">حالتك الصحية</h2>'+(sc.score!=null?'<span class="rep-grade">'+sc.grade+'</span>':"")+'</div><div class="rep-stats"><div class="rep-stat"><div class="n">'+sc.tot+'</div><div class="l">مؤشرات</div></div><div class="rep-stat"><div class="n" style="color:#fbbf24">'+sc.watch+'</div><div class="l">تستدعي انتباه</div></div><div class="rep-stat"><div class="n" style="color:#f87171">'+sc.alert+'</div><div class="l">حرجة</div></div><div class="rep-stat"><div class="n" style="color:#34d399">'+sc.norm+'</div><div class="l">ضمن المعدل</div></div></div></div></div>'+
+   '<div class="labt" style="margin-top:18px"><div class="labt-h2"><h3 class="labt-t2">سجل المؤشرات — مشروح</h3><p class="labt-sub2">كل مؤشر بقيمته وموقعه من المعدل وشرح تأثيره.</p></div>'+modernTable(meas.map(function(s){return {ar:s.label,en:"",val:s.val,num:s.num,unit:s.unit,range:s.range,flag:s.flag,slabel:s.slabel,explain:s.exp,exl:s.exl}}))+'</div>'+
+   (plan.length?'<div class="bigcard" style="margin-top:18px"><div class="kicker"><svg class="ico"><use href="#i-pill"/></svg> الخطة العلاجية الحالية</div><div class="rxlist">'+plan.map(function(m){return '<div class="rxcard rx-good"><div class="rxtop"><b class="rxname">'+esc(m.name||"-")+'</b>'+(m.dose?'<span class="rxdose">'+esc(m.dose)+'</span>':"")+(m.timing?'<span class="rxtime">'+esc(m.timing)+'</span>':"")+'</div>'+((m.reason||m.notes)?'<p class="rxwhy"><span class="rxwhy-l">السبب</span> '+esc(m.reason||m.notes)+'</p>':"")+'</div>'}).join("")+'</div></div>':"")+
+   '<div class="rep-foot">© 2026 Entix Health · توجيه تنظيمي شخصي — ليس بديلاً عن الطبيب المعالج. صُمّم ويُدار بواسطة ENSIDEX.</div>'):'<div class="empty">ما فيه مؤشرات بعد — ارفع تحليلك لتوليد التقرير.</div>';
+ v.innerHTML='<div class="head"><div><p class="eyebrow"><svg class="ico"><use href="#i-report"/></svg> VITA · MEDICAL REPORT</p><h1 class="h1">التقارير</h1><div class="subline">تقرير صحي قابل للطباعة — درجة، جدول مؤشرات مشروح، وخطة. وأرشيف ملفاتك.</div></div>'+
+  '<div class="phead-r"><button class="printbtn" onclick="printReport()"><svg class="ico"><use href="#i-report"/></svg> طباعة التقرير</button><button class="btn" style="width:auto;padding:11px 20px" onclick="document.getElementById(\'rinp\').click()">رفع تقرير</button><input type="file" id="rinp" class="hidden" multiple onchange="upReport(this.files)"></div></div>'+
+  '<div class="divider"></div><div id="printable">'+repCore+'</div>'+
+  '<div class="labt-h2" style="margin-top:24px"><h3 class="labt-t2">أرشيف الملفات</h3></div>'+
+  (docs.length?docs.slice(0,40).map(function(x){return '<div class="row"><span class="pill p-good">'+esc((x.document_type||x.report_kind||"FILE").toUpperCase().slice(0,8))+'</span><div><b>'+esc(x.title||"تقرير")+'</b><div style="color:var(--muted);font-size:13px;margin-top:4px">'+esc((x.summary||"").slice(0,140))+'</div></div></div>'}).join(""):'<div class="empty">ما فيه ملفات بعد.</div>');}
 async function upReport(files){const v=document.getElementById("reports");const n=document.createElement("div");n.className="empty";n.textContent="جارٍ الرفع والاستخراج…";v.prepend(n);for(const f of files){const fd=new FormData();fd.append("file",f);try{await fetch("/api/documents",{method:"POST",credentials:"include",body:fd})}catch{}}setTimeout(loadReports,1400)}
 
 /* PROTOCOL */
+function pSlot(t){t=(t||"").toLowerCase();if(/مساء|ليل|bed|evening|night|عشاء|نوم/.test(t))return"eve";if(/ظهر|ظهير|noon|afternoon|غداء|lunch/.test(t))return"noon";return"morn";}
+function pAlertTxt(m){var t=((m.notes||"")+" "+(m.reason||"")).toLowerCase();if(/تعارض|conflict|مباعد|gap|hours apart|بعيد|away from|interaction|امتصاص/.test(t))return(m.notes||m.reason||"");return"";}
+function adhKey(){return "entix_adh_"+new Date().toISOString().slice(0,10);}
+function getAdh(){try{return JSON.parse(localStorage.getItem(adhKey())||"{}")}catch(e){return{}}}
+function setAdh(o){try{localStorage.setItem(adhKey(),JSON.stringify(o))}catch(e){}}
+function toggleDose(id){var a=getAdh();a[id]=!a[id];setAdh(a);loadProtocol();}
+function setProtoView(v){STATE.protoView=v;loadProtocol();}
 async function loadProtocol(){const v=document.getElementById("protocol");v.innerHTML='<div class="empty">جارٍ التحميل…</div>';
  const r=await api("/api/protocol");const p=(r.data&&(r.data.protocol_snapshot||r.data))||{};
- const sch=(p.schedule||[]).filter(s=>s.items&&s.items.length);
- const meds=p.medications||[],supps=p.supplements||[],inter=p.interactions||[],reds=p.red_lines||[];
- const hasAny=meds.length||supps.length;
- const rxStat=(m,why)=>{var t=((why||"")+" "+(m.name||"")+" "+(m.notes||"")+" "+(m.reason||"")).toLowerCase();if(/lock|مقفل|no escalation|sign-off|locked/.test(t))return{c:"warning",t:"مقفل · لا تصعيد"};if(/gap|مباعد|spac|hours apart|بعيد|4-6h|4h|away from/.test(t))return{c:"info",t:"مباعدة دوائية"};return{c:"good",t:"نشط"}};const rx=(m,why)=>`<div class="rxcard rx-${rxStat(m,why).c}"><div class="rxtop"><b class="rxname">${esc(m.name||"-")}</b>${m.dose?`<span class="rxdose">${esc(m.dose)}</span>`:""}${m.timing?`<span class="rxtime">${esc(m.timing)}</span>`:""}<span class="rxstat ${rxStat(m,why).c}"><span class="bdot"></span>${rxStat(m,why).t}</span></div>${why?`<p class="rxwhy"><span class="rxwhy-l">السبب والتعليمات</span> ${esc(why)}</p>`:`<p class="rxwhy rxwhy-empty">${esc([m.frequency,m.timing].filter(Boolean).join(" · ")||"بدون ملاحظات")}</p>`}</div>`;
- v.innerHTML=`
-  <div class="head"><div>
-   <p class="eyebrow"><svg class="ico"><use href="#i-pill"/></svg> VITA · PERSONAL TREATMENT PROTOCOL</p>
-   <h1 class="h1">البروتوكول العلاجي</h1>
-   <div class="subline"><svg class="ico"><use href="#i-spacing"/></svg> أدويتك ومكمّلاتك بأسبابها وتوقيتها وقواعد المباعدة — من ملفك ومجلس الأطباء.</div>
-  </div><div class="phead-r"><button class="printbtn" onclick="window.print()"><svg class="ico"><use href="#i-report"/></svg> طباعة / PDF</button><div class="dbpill"><svg class="ico"><use href="#i-shieldcheck"/></svg> ${meds.length+supps.length} عنصر فعّال</div></div></div>
-  <div class="divider"></div>
-  ${meds.length?`<div class="bigcard"><div class="kicker"><svg class="ico"><use href="#i-pill"/></svg> أولاً · الأدوية الموصوفة <span class="kicker-en">Prescription Medications</span></div><div class="rxlist">${meds.map(m=>rx(m,m.notes||m.reason||"")).join("")}</div></div>`:""}
-  ${supps.length?`<div class="bigcard"><div class="kicker"><svg class="ico"><use href="#i-heart"/></svg> ثانياً · المكمّلات العلاجية <span class="kicker-en">Targeted Supplements</span></div><div class="rxlist">${supps.map(m=>rx(m,m.reason||m.notes||"")).join("")}</div></div>`:""}
-  ${sch.length?`<div class="cardp"><div class="spx-h"><div class="pb"><svg class="ico"><use href="#i-spacing"/></svg></div><div><div class="ke">Active Clinical Spacing</div><b>الجدول اليومي والمباعدة</b></div></div>
-   <div class="ptimeline">${sch.map(s=>`<div class="pslot"><div class="pslot-t"><span class="pdot"></span><b>${esc(s.label||s.slot)}</b></div><div class="pitems">${s.items.map(i=>`<span class="pchip">${esc(i)}</span>`).join("")}</div>${s.notes?`<p class="pnote">${esc(s.notes)}</p>`:""}</div>`).join("")}</div></div>`:""}
-  ${(inter.length||reds.length)?`<div class="dark"><div class="dhead"><div class="ib"><svg class="ico"><use href="#i-shieldcheck"/></svg></div><div><div class="ke">Safety Rules &amp; Interactions</div><h2>قواعد السلامة والتعارضات</h2></div></div>
-   <div class="dalerts">${(inter.length?inter:reds).map(a=>`<div class="dalert"><div class="ex"><svg class="ico"><use href="#i-alert"/></svg></div><div><h4>${esc(a.title||a.message||a.code||"قاعدة سلامة")}</h4><p>${esc(a.body||a.detail||a.message||"")}</p></div></div>`).join("")}</div></div>`:""}
-  ${!hasAny?'<div class="empty">البروتوكول يتكوّن تلقائياً بعد إضافة أدوية/مكملات أو رفع تقارير. اسأل المجلس عن جرعاتك لبدء البناء.</div>':""}`;}
+ const meds=(p.medications||[]).map(function(m){return {name:m.name,dose:m.dose,frequency:m.frequency,timing:m.timing,notes:m.notes,reason:m.reason,cat:"علاج نشط",catCls:"med",kind:"med"}});
+ const supps=(p.supplements||[]).map(function(m){return {name:m.name,dose:m.dose,frequency:m.frequency,timing:m.timing,notes:m.notes,reason:m.reason,cat:"مكمل يومي",catCls:"supp",kind:"supp"}});
+ const items=meds.concat(supps).map(function(m,i){var why=m.notes||m.reason||"";return {name:m.name||"-",dose:m.dose||"",freq:m.frequency||"",timing:m.timing||"",why:why,cat:m.cat,catCls:m.catCls,slot:pSlot(m.timing||m.frequency),alert:pAlertTxt(m),id:(m.kind+"-"+(m.name||i)).replace(/\s+/g,"_")};});
+ const inter=p.interactions||[],reds=p.red_lines||[];
+ const view=STATE.protoView||"today";
+ const adh=getAdh();const done=items.filter(function(it){return adh[it.id]}).length;const pct=items.length?Math.round(done/items.length*100):0;
+ const slots=[{k:"morn",t:"الصباح",sub:"بعد الاستيقاظ والإفطار"},{k:"noon",t:"الظهيرة",sub:"بين 12م و 4م"},{k:"eve",t:"المساء",sub:"قبل النوم"}];
+ function card(it){return '<div class="pcard pc-'+it.catCls+'"><div class="pc-top"><div><b class="pc-name">'+esc(it.name)+'</b><div class="pc-sub">'+esc([it.dose,it.freq].filter(Boolean).join(" · "))+'</div></div><span class="pc-cat '+it.catCls+'">'+esc(it.cat)+'</span></div>'+
+   '<div class="pc-meta"><div><span class="pc-l">التكرار</span><b>'+esc(it.freq||"—")+'</b></div><div><span class="pc-l">التعليمات</span><b>'+esc(it.timing||"—")+'</b></div></div>'+
+   (it.why?'<p class="pc-why">'+esc(it.why)+'</p>':"")+
+   (it.alert?'<div class="pc-alert"><svg class="ico"><use href="#i-alert"/></svg><div><b>تنبيه تعارض / امتصاص</b><p>'+esc(it.alert)+'</p></div></div>':"")+'</div>';}
+ function tlItem(it){var d=adh[it.id];return '<div class="ptl-card'+(d?" done":"")+'" onclick="toggleDose(\''+it.id+'\')"><span class="ptl-ck">'+(d?"✓":"")+'</span><div><b>'+esc(it.name)+'</b><div class="ptl-sub">'+(esc([it.dose,it.timing].filter(Boolean).join(" · "))||esc(it.cat))+'</div></div></div>';}
+ const header='<div class="head"><div><p class="eyebrow"><svg class="ico"><use href="#i-pill"/></svg> VITA · PERSONAL TREATMENT PROTOCOL</p><h1 class="h1">بروتوكولات العلاج</h1><div class="subline">متابعة الأدوية، المكمّلات، والأنشطة الصحية المجدولة.</div></div>'+
+  '<div class="phead-r"><div class="adh"><span class="adh-l">معدل الالتزام (اليوم)</span><b class="adh-v">'+pct+'%</b></div><button class="printbtn" onclick="window.print()"><svg class="ico"><use href="#i-report"/></svg> طباعة</button></div></div>'+
+  '<div class="ptoggle"><button class="'+(view==="today"?"on":"")+'" onclick="setProtoView(\'today\')">جدول اليوم</button><button class="'+(view==="full"?"on":"")+'" onclick="setProtoView(\'full\')">الخطة الشاملة</button></div>';
+ var body;
+ if(!items.length){body='<div class="empty">البروتوكول يتكوّن تلقائياً بعد إضافة أدوية/مكملات أو رفع تقارير. اسأل المجلس عن جرعاتك.</div>';}
+ else if(view==="today"){body='<div class="ptl">'+slots.map(function(sl){var its=items.filter(function(it){return it.slot===sl.k});if(!its.length)return"";return '<div class="ptl-slot"><div class="ptl-head"><span class="ptl-dot"></span><div><b>'+sl.t+'</b><div class="ptl-hsub">'+sl.sub+'</div></div></div><div class="ptl-list">'+its.map(tlItem).join("")+'</div></div>';}).join("")+'</div>';}
+ else{body='<div class="pgrid">'+items.map(card).join("")+'</div>'+((inter.length||reds.length)?'<div class="dark" style="margin-top:18px"><div class="dhead"><div class="ib"><svg class="ico"><use href="#i-shieldcheck"/></svg></div><div><div class="ke">Safety Rules and Interactions</div><h2>قواعد السلامة والتعارضات</h2></div></div><div class="dalerts">'+(inter.length?inter:reds).map(function(a){return '<div class="dalert"><div class="ex"><svg class="ico"><use href="#i-alert"/></svg></div><div><h4>'+esc(a.title||a.message||a.code||"قاعدة سلامة")+'</h4><p>'+esc(a.body||a.detail||a.message||"")+'</p></div></div>'}).join("")+'</div></div>':"");}
+ v.innerHTML=header+body;
+}
 
 window.addEventListener("hashchange",()=>{if(!document.getElementById("app").classList.contains("hidden"))route()});
 boot();
