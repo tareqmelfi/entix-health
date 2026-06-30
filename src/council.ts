@@ -516,6 +516,7 @@ export type ExtractedMarker = {
   flag: string | null;
   status_label: string | null;
   explain: string | null;
+  explain_long: string | null;
 };
 export type LabExtraction = {
   panel_date: string | null;
@@ -535,7 +536,7 @@ export async function visionExtractLabs(
   const system =
     "You are a meticulous medical laboratory report extractor. Read the lab report image(s) carefully and extract EVERY test/marker exactly as printed. Be precise with numbers, units and reference ranges. Return ONLY valid JSON, no prose.";
   const instruction =
-    'Extract all lab markers from the image(s). Return strict JSON only:\n{"panel_date":"YYYY-MM-DD or null","lab_name":"string or null","markers":[{"marker_name":"canonical English test name","name_ar":"Arabic name of the test","value_text":"value exactly as printed","value_numeric":number or null,"unit":"unit string or null","reference_range":"low-high or as printed or null","flag":"high|low|normal|critical or null","status_label":"short ARABIC descriptive status","explain":"short ARABIC sentence: what this marker is and why it matters"}]}\nRules: use canonical English marker names (e.g. TSH, Free T4, Ferritin, Iron, TIBC, Vitamin D, Vitamin B12, HbA1c, Fasting Glucose, ALT, AST, Creatinine, eGFR, Hemoglobin, Hematocrit, WBC, Platelets, LDL, HDL, Total Cholesterol, Triglycerides). "name_ar" = the common Arabic name (e.g. WBC → "خلايا الدم البيضاء", Ferritin → "مخزون الحديد", Vitamin D → "فيتامين د", HbA1c → "السكر التراكمي"). "status_label" = a short nuanced ARABIC status reflecting where the value sits vs its range (e.g. "طبيعي"، "طبيعي ومستقر"، "مرتفع قليلاً"، "منخفض قليلاً"، "نقص يتطلب تدخل"، "مرتفع — يحتاج متابعة"). Map each marker to its correct unit — never put an enzyme unit (U/L) on glucose or a hormone. value_numeric must be a number only. If a value is text put it in value_text and set value_numeric null. "explain" MUST be Arabic, max ~14 words, educational (what it measures + significance). Do not invent markers that are not present.';
+    'Extract all lab markers from the image(s). Return strict JSON only:\n{"panel_date":"YYYY-MM-DD or null","lab_name":"string or null","markers":[{"marker_name":"canonical English test name","name_ar":"Arabic name of the test","value_text":"value exactly as printed","value_numeric":number or null,"unit":"unit string or null","reference_range":"low-high or as printed or null","flag":"high|low|normal|critical or null","status_label":"short ARABIC descriptive status","explain":"short ARABIC tagline (max ~7 words): what this marker is","explain_long":"detailed ARABIC explanation (1-2 sentences, ~30-45 words): what it measures, what happens if it is HIGH and if it is LOW, and what this specific value means for the patient"}]}\nRules: use canonical English marker names (e.g. TSH, Free T4, Ferritin, Iron, TIBC, Vitamin D, Vitamin B12, HbA1c, Fasting Glucose, ALT, AST, Creatinine, eGFR, Hemoglobin, Hematocrit, WBC, Platelets, LDL, HDL, Total Cholesterol, Triglycerides). "name_ar" = the common Arabic name (e.g. WBC → "خلايا الدم البيضاء", Ferritin → "مخزون الحديد", Vitamin D → "فيتامين د", HbA1c → "السكر التراكمي"). "status_label" = a short nuanced ARABIC status reflecting where the value sits vs its range (e.g. "طبيعي"، "طبيعي ومستقر"، "مرتفع قليلاً"، "منخفض قليلاً"، "نقص يتطلب تدخل"، "مرتفع — يحتاج متابعة"). Map each marker to its correct unit — never put an enzyme unit (U/L) on glucose or a hormone. value_numeric must be a number only. If a value is text put it in value_text and set value_numeric null. "explain" = short Arabic tagline only. "explain_long" MUST be Arabic, 1-2 full sentences, and MUST describe the effect of BOTH a high and a low value plus the meaning of this patient\'s actual result (this is the core educational value — be specific, not generic). Do not invent markers that are not present.';
   const content: any[] = images.slice(0, 6).map((im) => ({
     type: "image",
     source: { type: "base64", media_type: im.media, data: im.b64 }
@@ -583,7 +584,8 @@ export async function visionExtractLabs(
         reference_range: m.reference_range ? String(m.reference_range).slice(0, 60) : null,
         flag: flag && ["high", "low", "normal", "critical", "abnormal"].includes(flag) ? flag : null,
         status_label: m.status_label ? String(m.status_label).slice(0, 48) : null,
-        explain: m.explain ? String(m.explain).slice(0, 180) : m.explanation ? String(m.explanation).slice(0, 180) : null
+        explain: m.explain ? String(m.explain).slice(0, 120) : m.explanation ? String(m.explanation).slice(0, 120) : null,
+        explain_long: m.explain_long ? String(m.explain_long).slice(0, 400) : m.explanation_long ? String(m.explanation_long).slice(0, 400) : null
       } as ExtractedMarker;
     })
     .filter(Boolean) as ExtractedMarker[];

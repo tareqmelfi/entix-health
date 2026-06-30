@@ -754,7 +754,7 @@ async function upsertLabPanelFromMarkers(client: any, person: any, sourceDocumen
     await client.query(
       `insert into lab_markers (lab_panel_id, person_id, marker_name, value_text, value_numeric, unit, reference_range, flag, interpretation, created_by)
        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-      [panel.id, person.id, m.marker_name, m.value_text || null, m.value_numeric ?? null, m.unit || null, m.reference_range || null, m.flag || null, m.explain || null, createdBy || "vision-extractor"]
+      [panel.id, person.id, m.marker_name, m.value_text || null, m.value_numeric ?? null, m.unit || null, m.reference_range || null, m.flag || null, m.explain_long || m.explain || null, createdBy || "vision-extractor"]
     );
   }
   return { lab_panel: panel, markers_saved: markers.length, markers };
