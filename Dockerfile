@@ -7,6 +7,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY package*.json ./
 RUN npm install --include=dev --no-audit --no-fund
 COPY . .
+# Linux is case-sensitive: normalize the SPA entry to lowercase index.html for @fastify/static
+RUN [ -f public/Index.html ] && [ ! -f public/index.html ] && mv public/Index.html public/index.html || true
+RUN rm -rf 99-Archive src/99-Archive public/.netlify
 RUN npm run build && npm prune --omit=dev
 RUN mkdir -p /data/health-memory/files /data/health-memory/exports /data/health-memory/logs-redacted
 ENV PORT=3030
