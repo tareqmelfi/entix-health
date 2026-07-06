@@ -252,6 +252,20 @@ body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-
 .rep-foot{margin-top:18px;padding-top:14px;border-top:1px solid var(--line);font-size:11.5px;color:#94a3b8}
 @media print{.rail,.lnav,.ptoggle,.phead-r,#rinp,.btn,.printbtn{display:none!important}body,.app{background:#fff!important}.screen{padding:0!important}.pcard,.ptl-card,.rep-score,tr{break-inside:avoid}}
 
+
+.cz-head{display:flex;gap:10px;margin:0 0 16px;flex-wrap:wrap}
+.cz-btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:#fff;color:var(--muted);font-weight:700;font-size:13px;padding:9px 16px;border-radius:10px;cursor:pointer;font-family:inherit}
+.cz-btn.on{border-color:var(--violet);color:var(--violet);background:var(--violet-soft)}
+.cz-btn .ico{width:15px;height:15px}
+.cz-restore{border:1px solid #fed7aa;background:#fff7ed;color:#9a3412;font-weight:700;font-size:13px;padding:9px 16px;border-radius:10px;cursor:pointer;font-family:inherit}
+.cz-panel{border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:18px;background:var(--bg)}
+.cz-ptitle{font-size:12.5px;color:var(--muted);margin-bottom:12px}
+.cz-row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #f1f5f9}
+.cz-row:last-child{border-bottom:none}
+.cz-row span{font-size:13.5px;color:var(--ink)}
+.cz-row.off span{color:#94a3b8;text-decoration:line-through}
+.cz-row button{border:1px solid var(--line);background:#fff;color:var(--violet);font-weight:700;font-size:12px;padding:6px 14px;border-radius:8px;cursor:pointer;font-family:inherit}
+.cz-row.off button{color:#166534;border-color:#bbf7d0;background:#f0fdf4}
 </style>
 </head>
 <body>
@@ -417,12 +431,19 @@ function gauge(g){const c=COL[g.status]||COL.pending;const num=g.numeric!=null?g
  <div class="gwrap"><svg viewBox="0 0 150 84" width="150" height="84"><path d="M13 76 A62 62 0 0 1 137 76" fill="none" stroke="#eef1f8" stroke-width="10" stroke-linecap="round"/><path d="M13 76 A62 62 0 0 1 137 76" fill="none" stroke="${c}" stroke-width="10" stroke-linecap="round" stroke-dasharray="${dash} 999"/><circle cx="${ex}" cy="${ey}" r="6" fill="#fff" stroke="${c}" stroke-width="3"/></svg></div>
  <div class="gval" style="color:${c}">${esc(disp)}${g.unit?`<span class="gu">${esc(g.unit)}</span>`:""}</div>
  <div class="grange">${g.range?"المعدّل الطبيعي: "+esc(g.range):esc(g.status_label||"—")}</div></div>`}
+function dashHidden(){try{return JSON.parse(localStorage.getItem("entix_dash_hidden")||"[]")}catch(e){return[]}}
+function setDashHidden(a){try{localStorage.setItem("entix_dash_hidden",JSON.stringify(a))}catch(e){}}
+function hideMarker(l){var h=dashHidden();if(h.indexOf(l)<0)h.push(l);setDashHidden(h);loadDash()}
+function showMarker(l){setDashHidden(dashHidden().filter(function(x){return x!==l}));loadDash()}
+function clearHidden(){setDashHidden([]);loadDash()}
+function toggleCustomize(){STATE.dashCustomize=!STATE.dashCustomize;loadDash()}
+function czBar(full,hidden){var btn='<div class="cz-head"><button class="cz-btn '+(STATE.dashCustomize?"on":"")+'" onclick="toggleCustomize()"><svg class="ico"><use href="#i-spacing"/></svg> تخصيص الداشبورد</button>'+(hidden.length?'<button class="cz-restore" onclick="clearHidden()">إظهار المخفية ('+hidden.length+')</button>':"")+'</div>';if(!STATE.dashCustomize)return btn;var rows=full.map(function(sg){var h=hidden.indexOf(sg.label)>=0;var arg=String(sg.label||"").replace(/[\x27\x22\\]/g,"");return '<div class="cz-row '+(h?"off":"")+'"><span>'+esc(sg.label||"—")+'</span><button onclick="'+(h?"showMarker":"hideMarker")+'(\x27'+arg+'\x27)">'+(h?"إظهار":"إخفاء")+'</button></div>';}).join("");return btn+'<div class="cz-panel"><div class="cz-ptitle">اختر المؤشرات الظاهرة — تنطبق على البطاقات والسجل · Choose visible markers</div>'+rows+'</div>';}
 async function loadDash(){const view=document.getElementById("dash");view.innerHTML='<div class="empty">جارٍ تحميل مؤشراتك…</div>';
  const r=await api("/api/dashboard");const d=(r.ok&&r.data)||{};const st=d.stats||{};
  let signals=(d.health_signals||[]).map(s=>({label:s.label,value:s.latest_value,numeric:s.latest_numeric,unit:s.unit,range:s.reference_range,status:s.status,status_label:s.status_label,pct:s.pct,summary:s.summary}));
  // signals with a real measured value first; keep up to 8
  signals.sort((a,b)=>((b.numeric!=null||(b.value!=null&&String(b.value).trim()))?1:0)-((a.numeric!=null||(a.value!=null&&String(a.value).trim()))?1:0));
- const allSignals=signals.slice();signals=signals.slice(0,8);
+ const fullSignals=signals.slice();const hidden=dashHidden();const allSignals=fullSignals.filter(function(s){return hidden.indexOf(s.label)<0});signals=allSignals.slice(0,8);
  const has=signals.some(s=>s.numeric!=null||(s.value!=null&&String(s.value).trim()));
  if(!has)signals=[{label:"ابدأ برفع تقرير",value:"—",unit:"لا مؤشرات بعد",status:"pending",pct:8}];
  const alerts=(d.risk_alerts||[]).slice(0,2);
@@ -433,7 +454,7 @@ async function loadDash(){const view=document.getElementById("dash");view.innerH
     <h1 class="h1">مؤشراتي الحيوية</h1>
     <div class="subline"><svg class="ico"><use href="#i-db"/></svg> قاعدة بيانات بيولوجية محقّقة — ${st.lab_markers||0} مؤشر · ${st.documents||0} ملف · ${st.reports||0} تقرير.</div>
   </div><div class="dbpill"><svg class="ico"><use href="#i-shieldcheck"/></svg> قاعدة بيانات آمنة · Secured</div></div>
-  <div class="divider"></div>
+  <div class="divider"></div>${czBar(fullSignals,hidden)}
   <div class="bigcard"><div class="kicker"><svg class="ico"><use href="#i-activity"/></svg> المؤشرات المخبرية <span class="kicker-en">Lab Biochemical Indices</span></div>
    <p class="lead">قياسات نشطة مترجمة من تقاريرك السريرية ومربوطة بالمعايير الصحية:</p>
    <div class="gauges">${signals.map(gauge).join("")}</div></div>

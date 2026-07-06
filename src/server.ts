@@ -1791,10 +1791,10 @@ async function handleEmailPasswordLogin(request: FastifyRequest, reply: FastifyR
   return { ok: true, person_slug: user.person_slug, email: user.email, role: user.role, status: "active" };
 }
 
-app.post("/api/login", handleEmailPasswordLogin);
+app.post("/api/login", { config: { rateLimit: { max: 8, timeWindow: "1 minute" } } }, handleEmailPasswordLogin);
 app.post("/api/email-login", handleEmailPasswordLogin);
 
-app.post("/api/signup", async (request, reply) => {
+app.post("/api/signup", { config: { rateLimit: { max: 5, timeWindow: "1 minute" } } }, async (request, reply) => {
   const body = z.object({ email: z.string().email(), password: z.string().min(8) }).parse(request.body);
   const result = await upsertActiveEmailUser(body.email, body.password);
   if (result.suspended) return reply.code(403).send({ error: "account_suspended" });
