@@ -266,6 +266,14 @@ body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-
 .cz-row.off span{color:#94a3b8;text-decoration:line-through}
 .cz-row button{border:1px solid var(--line);background:#fff;color:var(--violet);font-weight:700;font-size:12px;padding:6px 14px;border-radius:8px;cursor:pointer;font-family:inherit}
 .cz-row.off button{color:#166534;border-color:#bbf7d0;background:#f0fdf4}
+
+.ctbl-wrap{overflow-x:auto;margin:12px 0;border:1px solid var(--line);border-radius:12px}
+.ctbl{width:100%;border-collapse:collapse;font-size:13.5px}
+.ctbl th{text-align:start;padding:11px 14px;font-size:11.5px;font-weight:700;color:var(--muted);background:#fafbfc;border-bottom:1px solid var(--line);white-space:nowrap}
+.ctbl td{padding:11px 14px;border-bottom:1px solid #f1f5f9;color:var(--ink);vertical-align:top;line-height:1.6}
+.ctbl tbody tr:last-child td{border-bottom:none}
+.ctbl tbody tr:hover{background:#fafbfc}
+.chr{border:none;border-top:1px solid var(--line);margin:16px 0}
 </style>
 </head>
 <body>
@@ -476,13 +484,7 @@ async function openConv(id){STATE.convId=id;document.querySelectorAll(".conv").f
 function loadCouncilList(){document.querySelectorAll(".conv").forEach(c=>c.classList.toggle("on",c.getAttribute("onclick").includes(STATE.convId||"___")))}
 function confCls(c){return c>=80?"hi":c>=60?"mid":"lo"}
 function mdInline(t){return t.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/`([^`]+)`/g,'<code>$1</code>').replace(/(\(?\d[\d.,]*\s?(?:ng\/mL|mg\/dL|g\/dL|mmol\/L|mIU\/L|µIU\/mL|IU|mcg|mg|%|كجم|kg)\)?)/g,'<span class="hl-num">$1</span>')}
-function mdToHtml(s){if(s==null)return"";const lines=esc(String(s)).split(/\n/);let html="",cur=null;const close=()=>{if(cur){html+=cur==="ol"?"</ol>":"</ul>";cur=null}};
- for(const raw of lines){const line=raw.trim();if(!line){close();continue}
-  const oli=line.match(/^\d+[\.\)]\s+(.*)$/);if(oli){if(cur!=="ol"){close();html+="<ol>";cur="ol"}html+="<li>"+mdInline(oli[1])+"</li>";continue}
-  const li=line.match(/^[-•*]\s+(.*)$/);if(li){if(cur!=="ul"){close();html+="<ul>";cur="ul"}html+="<li>"+mdInline(li[1])+"</li>";continue}
-  close();const hd=line.match(/^\*\*(.+?)\*\*:?\s*$/);if(hd){html+='<h4 class="mh">'+mdInline(hd[1])+'</h4>';continue}
-  html+="<p>"+mdInline(line)+"</p>";}
- close();return html}
+function mdToHtml(s){if(s==null)return"";const L=esc(String(s)).split(/\n/);let html="",cur=null,i=0;const close=function(){if(cur){html+=cur==="ol"?"</ol>":"</ul>";cur=null}};const isSep=function(r){return /\|/.test(r)&&/^[\s|:-]*-{2,}[\s|:-]*$/.test(String(r).trim())};const cells=function(r){return String(r).trim().replace(/^\|/,"").replace(/\|$/,"").split("|").map(function(c){return c.trim()})};while(i<L.length){var line=L[i].trim();if(!line){close();i++;continue}if(line.indexOf("|")>=0&&i+1<L.length&&isSep(L[i+1])){close();var head=cells(line);i+=2;var rows=[];while(i<L.length&&L[i].indexOf("|")>=0&&L[i].trim()){rows.push(cells(L[i]));i++}html+='<div class="ctbl-wrap"><table class="ctbl"><thead><tr>'+head.map(function(h){return '<th>'+mdInline(h)+'</th>'}).join("")+'</tr></thead><tbody>'+rows.map(function(r){return '<tr>'+r.map(function(c){return '<td>'+mdInline(c)+'</td>'}).join("")+'</tr>'}).join("")+'</tbody></table></div>';continue}if(/^(---+|\*\*\*+|___+)$/.test(line)){close();html+='<hr class="chr">';i++;continue}var atx=line.match(/^(#{1,4})\s+(.*)$/);if(atx){close();html+='<h4 class="mh">'+mdInline(atx[2])+'</h4>';i++;continue}var oli=line.match(/^\d+[\.\)]\s+(.*)$/);if(oli){if(cur!=="ol"){close();html+="<ol>";cur="ol"}html+="<li>"+mdInline(oli[1])+"</li>";i++;continue}var li2=line.match(/^[-•*]\s+(.*)$/);if(li2){if(cur!=="ul"){close();html+="<ul>";cur="ul"}html+="<li>"+mdInline(li2[1])+"</li>";i++;continue}close();var hd=line.match(/^\*\*(.+?)\*\*:?\s*$/);if(hd){html+='<h4 class="mh">'+mdInline(hd[1])+'</h4>';i++;continue}html+="<p>"+mdInline(line)+"</p>";i++}close();return html}
 function bubble(side,body,meta,files){const sc=document.getElementById("cscroll");const d=document.createElement("div");d.className="bub "+side;let h="";
  if(files&&files.length)h+=`<div class="files">${files.map(f=>{const isImg=f&&f.type&&typeof f.type==="string"&&f.type.startsWith("image/");const nm=typeof f==="string"?f:(f&&f.name)||"ملف";return isImg?`<img class="fimg" src="${URL.createObjectURL(f)}" alt="">`:`<span class="fchip"><svg class="ico"><use href="#i-clip"/></svg> ${esc(nm)}</span>`}).join("")}</div>`;
  h+= side==="ai" ? `<div class="md">${mdToHtml(body)}</div>` : esc(body);
