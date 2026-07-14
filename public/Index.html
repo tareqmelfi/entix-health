@@ -227,6 +227,28 @@ body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-
 .lf-legal .lf-callout{background:var(--bg);border:1px solid var(--line);border-inline-start:3px solid var(--violet);border-radius:10px;padding:12px 14px;margin:14px 0}
 .lf-legal .lf-callout p{margin:0;color:var(--ink);font-weight:600}
 @media(max-width:640px){.lf-legal{font-size:13px;padding:4px 2px}}
+/* Legal standalone pages */
+.legal-page{min-height:100vh;background:var(--bg);display:flex;flex-direction:column}
+.lp-nav{position:sticky;top:0;z-index:50;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.lp-nav-inner{max-width:1080px;margin:0 auto;padding:14px 28px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+.lp-back{display:inline-flex;align-items:center;gap:7px;background:none;border:none;color:var(--muted);font-family:inherit;font-size:14px;font-weight:700;cursor:pointer;padding:8px 10px;border-radius:10px;transition:background .15s,color .15s}
+.lp-back:hover{background:var(--divider);color:var(--ink)}
+.lp-back .ico{width:18px;height:18px;transform:rotate(180deg)}
+.lp-nav-brand{font-weight:800;font-size:16px;letter-spacing:.02em}.lp-nav-brand .bx{color:#1e3a8a}.lp-nav-brand .bd{color:var(--violet);margin:0 2px}.lp-nav-brand .bh{color:var(--violet)}
+.lp-nav-cta{font-size:13.5px;font-weight:700;color:var(--violet);text-decoration:none;padding:8px 16px;border:1.5px solid var(--violet);border-radius:10px;transition:background .15s,color .15s}
+.lp-nav-cta:hover{background:var(--violet);color:#fff}
+.lp-body{max-width:760px;margin:0 auto;padding:40px 28px 24px;flex:1;width:100%}
+.lp-head{text-align:center;margin-bottom:28px}
+.lp-head .eyebrow{color:var(--violet);font-weight:800;font-size:12px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px}
+.lp-head h1{font-size:34px;font-weight:800;letter-spacing:-.02em;color:var(--ink);margin:0 0 10px}
+.lp-head .lf-upd{margin:0 auto}
+.lp-related{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-top:36px;padding-top:24px;border-top:1px solid var(--line)}
+.lp-rel-link{color:var(--violet);font-weight:700;font-size:14px;text-decoration:none}
+.lp-rel-link:hover{text-decoration:underline}
+.lp-rel-cta{background:var(--violet);color:#fff;border:none;font-family:inherit;font-weight:700;font-size:14px;padding:12px 22px;border-radius:12px;cursor:pointer;transition:opacity .15s}
+.lp-rel-cta:hover{opacity:.9}
+.lp-foot{max-width:1080px;margin:0 auto;padding:24px 28px 36px;color:var(--dim);font-size:12px;text-align:center;width:100%}
+@media(max-width:640px){.lp-nav-inner{padding:12px 18px}.lp-body{padding:28px 18px 16px}.lp-head h1{font-size:26px}.lp-rel-cta{width:100%}}
 .lf-bottom{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;border-top:1px solid var(--line);padding-top:18px;margin-top:8px;color:var(--dim);font-size:12px}
 .lf-by{font-weight:700;color:var(--muted)}.lf-by b{color:var(--ink);letter-spacing:.05em}.lf-by .lf-dot{color:var(--violet)}
 @media(max-width:820px){.bento{grid-template-columns:1fr 1fr}.bcard.feat{grid-row:auto}}
@@ -385,6 +407,7 @@ body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-
 <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke-width="2"/></symbol>
 <symbol id="i-clip" viewBox="0 0 24 24"><path d="M21 11.5 12.5 20a5 5 0 0 1-7-7l8-8a3.3 3.3 0 0 1 4.7 4.7l-8 8a1.6 1.6 0 0 1-2.3-2.3l7.4-7.4"/></symbol>
 <symbol id="i-google" viewBox="0 0 24 24" fill="none"><path fill="#4285F4" d="M21.6 12.2c0-.7-.06-1.2-.18-1.8H12v3.3h5.5c-.1.9-.7 2.2-1.9 3.1l2.8 2.2c1.6-1.5 2.7-3.8 2.7-6.8z"/><path fill="#34A853" d="M12 22c2.5 0 4.6-.8 6.2-2.2l-3-2.3c-.8.5-1.9.9-3.2.9-2.4 0-4.5-1.6-5.2-3.9l-3.1 2.4A10 10 0 0 0 12 22z"/><path fill="#FBBC05" d="M6.8 14.5a6 6 0 0 1 0-3.8L3.7 8.3a10 10 0 0 0 0 7.4z"/><path fill="#EA4335" d="M12 6.8c1.7 0 2.9.7 3.5 1.3l2.6-2.5C16.6 4.1 14.5 3.2 12 3.2A10 10 0 0 0 3.7 8.3l3.1 2.4C7.5 8.4 9.6 6.8 12 6.8z"/></symbol>
+<symbol id="i-arrow" viewBox="0 0 24 24"><path d="M14 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
 </defs></svg>
 
 <!-- LANDING -->
@@ -411,10 +434,28 @@ body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-
   <footer class="lfooter">
     <div class="lf-top">
       <div class="lf-brand"><span style="color:#1e3a8a">ENTIX</span><span style="color:var(--violet);margin:0 2px">·</span><span style="color:var(--violet)">HEALTH</span></div>
-      <div class="lf-links"><a href="#privacy" onclick="lp('privacy')">سياسة الخصوصية</a><a href="#terms" onclick="lp('terms')">الشروط والأحكام</a><a href="#" onclick="enterApp();return false">دخول</a></div>
+      <div class="lf-links"><a href="#privacy" onclick="openLegal('privacy');return false">سياسة الخصوصية</a><a href="#terms" onclick="openLegal('terms');return false">الشروط والأحكام</a><a href="#" onclick="enterApp();return false">دخول</a></div>
     </div>
-    <details class="lf-doc" id="privacy"><summary>سياسة الخصوصية · Privacy Policy</summary><div class="lf-legal">
+    <div class="lf-bottom"><span>© 2026 Entix Health · Wyoming, USA · جميع الحقوق محفوظة.</span><span class="lf-by">صُمّم ويُدار بواسطة <b>ENSIDEX</b><span class="lf-dot">.</span></span></div>
+  </footer>
+</section>
+
+<!-- LEGAL: Privacy Policy (standalone page) -->
+<section id="legal-privacy" class="legal-page hidden">
+  <nav class="lp-nav">
+    <div class="lp-nav-inner">
+      <button class="lp-back" onclick="backFromLegal()"><svg class="ico"><use href="#i-arrow"/></svg> <span>رجوع</span></button>
+      <div class="lp-nav-brand"><span class="bx">ENTIX</span><span class="bd">·</span><span class="bh">HEALTH</span></div>
+      <a class="lp-nav-cta" href="#" onclick="enterApp();return false">دخول</a>
+    </div>
+  </nav>
+  <article class="lp-body">
+    <header class="lp-head">
+      <p class="eyebrow">/ Privacy Policy</p>
+      <h1>سياسة الخصوصية</h1>
       <span class="lf-upd">آخر تحديث: 15 يوليو 2026 · النسخة 1.0</span>
+    </header>
+    <div class="lf-legal">
       <div class="lf-callout"><p>بياناتك الصحية مملوكة لك. هذه السياسة تشرح — بالتفصيل — ما نجمعه، كيف نستخدمه، أين نُخزّنه، ومن يصل إليه.</p></div>
       <span class="lf-sec">١ · المقدّمة والكيان المسؤول</span>
       <h4>من نحن</h4>
@@ -496,9 +537,31 @@ body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-
       <p>قد نُحدّث هذه السياسة من حين لآخر لانعكاس تغيّرات الخدمة أو المتطلبات القانونية. سنُشير إلى تاريخ آخر تحديث أعلى الوثيقة. استمرارك في استخدام المنصّة بعد التغيير يُعدّ قبولاً للسياسة المُحدَّثة.</p>
       <span class="lf-sec">١١ · التواصل</span>
       <p>لأي استفسار يتعلّق بخصوصيتك أو بياناتك، تواصل مع ENSIDEX LLC عبر القناة الرسمية المعتمدة على موقع المنصّة.</p>
-    </div></details>
-    <details class="lf-doc" id="terms"><summary>الشروط والأحكام · Terms of Service</summary><div class="lf-legal">
+    </div>
+    <div class="lp-related">
+      <a class="lp-rel-link" href="#terms" onclick="openLegal('terms');return false">الشروط والأحكام ←</a>
+      <button class="lp-rel-cta" onclick="enterApp()">ابدأ استخدام المنصّة</button>
+    </div>
+  </article>
+  <footer class="lp-foot"><span>© 2026 Entix Health · Wyoming, USA · صُمّم ويُدار بواسطة ENSIDEX LLC.</span></footer>
+</section>
+
+<!-- LEGAL: Terms of Service (standalone page) -->
+<section id="legal-terms" class="legal-page hidden">
+  <nav class="lp-nav">
+    <div class="lp-nav-inner">
+      <button class="lp-back" onclick="backFromLegal()"><svg class="ico"><use href="#i-arrow"/></svg> <span>رجوع</span></button>
+      <div class="lp-nav-brand"><span class="bx">ENTIX</span><span class="bd">·</span><span class="bh">HEALTH</span></div>
+      <a class="lp-nav-cta" href="#" onclick="enterApp();return false">دخول</a>
+    </div>
+  </nav>
+  <article class="lp-body">
+    <header class="lp-head">
+      <p class="eyebrow">/ Terms of Service</p>
+      <h1>الشروط والأحكام</h1>
       <span class="lf-upd">آخر تحديث: 15 يوليو 2026 · النسخة 1.0</span>
+    </header>
+    <div class="lf-legal">
       <div class="lf-callout"><p>باستخدامك منصّة Entix Health فإنك تُقرّ بقراءة هذه الشروط والموافقة عليها. إن لم توافق، فلا تستخدم المنصّة.</p></div>
       <span class="lf-sec">١ · قبول الشروط</span>
       <p>هذه الشروط والأحكام («الشروط») تُشكّل اتفاقاً قانونياً بينك وبين <strong>ENSIDEX LLC</strong> («الشركة» أو «نحن») المنفّذة لمنصّة <strong>Entix Health</strong> («المنصّة»). بدخولك أو استخدامك المنصّة بأي صورة، تُعدّ موافقاً على الالتزام بهذه الشروط كاملةً.</p>
@@ -552,7 +615,7 @@ body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-
         <li>لا نضمن دقّة مطلقة لاستخراج المؤشرات أو لتوصيات النماذج — التحقق النهائي مسؤوليتك وطبيبك.</li>
       </ul>
       <span class="lf-sec">١١ · التعويض</span>
-      <p>أنت توافق على تعويض ENSIDEX LLC ومسؤوليها وموظفيها وحمايتهم من أي مطالبات أو خسائر أو نفقات قانونية ناتجة عن misuse حسابك أو مخالفتك لهذه الشروط أو انتهاكك حقوق الغير.</p>
+      <p>أنت توافق على تعويض ENSIDEX LLC ومسؤوليها وموظفيها وحمايتهم من أي مطالبات أو خسائر أو نفقات قانونية ناتجة عن إساءة استخدام حسابك أو مخالفتك لهذه الشروط أو انتهاكك حقوق الغير.</p>
       <span class="lf-sec">١٢ · القانون الحاكم والاختصاص</span>
       <p>تخضع هذه الشروط لقوانين ولاية وايومنغ، الولايات المتحدة الأمريكية. أي نزاع يُحَلّ عبر التحكيم أو المحاكم المختصّة في الولاية، ما لم يُنص على خلاف ذلك.</p>
       <span class="lf-sec">١٣ · التعديلات على الشروط</span>
@@ -561,9 +624,13 @@ body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-
       <p>إذا اعتُبر أي بند من هذه الشروط غير قابل للإنفاذ قانونياً، تظل البنود الأخرى سارية وكاملة المفعول.</p>
       <span class="lf-sec">١٥ · التواصل</span>
       <p>لأي استفسار حول هذه الشروط، تواصل مع ENSIDEX LLC عبر القناة الرسمية المعتمدة على موقع المنصّة.</p>
-    </div></details>
-    <div class="lf-bottom"><span>© 2026 Entix Health · Wyoming, USA · جميع الحقوق محفوظة.</span><span class="lf-by">صُمّم ويُدار بواسطة <b>ENSIDEX</b><span class="lf-dot">.</span></span></div>
-  </footer>
+    </div>
+    <div class="lp-related">
+      <a class="lp-rel-link" href="#privacy" onclick="openLegal('privacy');return false">→ سياسة الخصوصية</a>
+      <button class="lp-rel-cta" onclick="enterApp()">ابدأ استخدام المنصّة</button>
+    </div>
+  </article>
+  <footer class="lp-foot"><span>© 2026 Entix Health · Wyoming, USA · صُمّم ويُدار بواسطة ENSIDEX LLC.</span></footer>
 </section>
 
 <!-- AUTH -->
@@ -680,8 +747,10 @@ async function doAuth(e){e.preventDefault();const b=document.getElementById("aut
 async function logout(){await api("/api/logout",{method:"POST"});showLanding()}
 
 function enterApp(m){if(STATE.authed){show(true);route()}else showAuth(m)}
-function lp(id){const d=document.getElementById(id);if(d){d.open=true;d.scrollIntoView({behavior:"smooth",block:"center"})}return false}
-async function boot(){try{const r=await api("/api/bootstrap");if(!r.ok){showLanding();return}STATE.user=r.data;STATE.authed=true;const em=(r.data&&(r.data.email||(r.data.user&&r.data.user.email)))||"T";document.getElementById("avatar").textContent=(em[0]||"T").toUpperCase();if(location.hash==="#home"){showLanding();return}show(true);route()}catch(e){showLanding()}}
+function openLegal(id){killSplash();var map={privacy:"legal-privacy",terms:"legal-terms"};var sec=document.getElementById(map[id]||id);if(!sec)return false;document.getElementById("landing").classList.add("hidden");document.getElementById("auth").classList.add("hidden");document.getElementById("app").classList.add("hidden");document.querySelectorAll(".legal-page").forEach(function(s){s.classList.add("hidden")});sec.classList.remove("hidden");window.scrollTo(0,0);return false}
+function backFromLegal(){var h=location.hash;if(h==="#privacy"||h==="#terms"){location.hash="#home"}showLanding();return false}
+function lp(id){return openLegal(id)}
+async function boot(){try{var h=location.hash;if(h==="#privacy"){showLanding();openLegal("privacy");return}if(h==="#terms"){showLanding();openLegal("terms");return}const r=await api("/api/bootstrap");if(!r.ok){showLanding();return}STATE.user=r.data;STATE.authed=true;const em=(r.data&&(r.data.email||(r.data.user&&r.data.user.email)))||"T";document.getElementById("avatar").textContent=(em[0]||"T").toUpperCase();if(h==="#home"){showLanding();return}show(true);route()}catch(e){showLanding()}}
 // Failsafe: never leave the splash logo stuck — whatever happens, show the landing.
 setTimeout(function(){if(document.getElementById("splash"))showLanding()},6000);
 function killSplash(){var s=document.getElementById("splash");if(s)s.remove()}
