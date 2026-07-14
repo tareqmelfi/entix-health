@@ -1792,8 +1792,26 @@ async function handleEmailPasswordLogin(request: FastifyRequest, reply: FastifyR
   return { ok: true, person_slug: user.person_slug, email: user.email, role: user.role, status: "active" };
 }
 
-app.post("/api/login", { config: { rateLimit: { max: 8, timeWindow: "1 minute" } } }, handleEmailPasswordLogin);
-app.post("/api/email-login", { config: { rateLimit: { max: 8, timeWindow: "1 minute" } } }, handleEmailPasswordLogin);
+// Both routes hit the same handler, so they must share ONE brute-force budget —
+// per-route rate-limit counters are independent and could be alternated (2x attempts).
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+async function sharedLoginLimit(request: any, reply: any) {
+  const now = Date.now();
+  if (loginAttempts.size > 5000) {
+    for (const [k, v] of loginAttempts) if (now >= v.resetAt) loginAttempts.delete(k);
+  }
+  const key = request.ip || "unknown";
+  const slot = loginAttempts.get(key);
+  if (!slot || now >= slot.resetAt) {
+    loginAttempts.set(key, { count: 1, resetAt: now + 60_000 });
+    return;
+  }
+  slot.count += 1;
+  if (slot.count > 8) return reply.code(429).send({ error: "too_many_attempts" });
+}
+
+app.post("/api/login", { preHandler: sharedLoginLimit }, handleEmailPasswordLogin);
+app.post("/api/email-login", { preHandler: sharedLoginLimit }, handleEmailPasswordLogin);
 
 app.post("/api/signup", { config: { rateLimit: { max: 5, timeWindow: "1 minute" } } }, async (request, reply) => {
   const body = z.object({ email: z.string().email(), password: z.string().min(8) }).parse(request.body);

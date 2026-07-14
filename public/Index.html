@@ -494,14 +494,13 @@ async function uploadHealthFiles(files,convId,progressHost){
  }
  return{saved,dup,extractions,pendingIds}}
 // Poll queued OCR docs so the user knows when markers land, then refresh views.
-function pollDocuments(ids){if(!ids||!ids.length)return;let tries=0;
- const iv=setInterval(async()=>{tries++;let allDone=true;
+function pollDocuments(ids){if(!ids||!ids.length)return;let tries=0,ticking=false;
+ const iv=setInterval(async()=>{if(ticking)return;ticking=true;tries++;
   for(const id of ids.slice()){const r=await api("/api/documents/"+id+"/status");const d=r.ok&&r.data;
-   if(d&&d.done){ids.splice(ids.indexOf(id),1);
+   if(d&&d.done){const ix=ids.indexOf(id);if(ix>=0)ids.splice(ix,1);
     if(d.markers_extracted>0){toast("تم استخراج "+d.markers_extracted+" مؤشر من «"+(d.title||"تقريرك")+"» — تحدّثت مؤشراتك ✓","ok");refreshActiveData()}
-    else if(d.ocr_status==="failed")toast("تعذّرت قراءة «"+(d.title||"الملف")+"» تلقائياً — جرّب صورة أوضح","err")}
-   else if(d)allDone=false}
-  if(!ids.length||tries>=25){clearInterval(iv);if(ids.length===0&&allDone)refreshActiveData()}},4000)}
+    else if(d.ocr_status==="failed")toast("تعذّرت قراءة «"+(d.title||"الملف")+"» تلقائياً — جرّب صورة أوضح","err")}}
+  if(!ids.length||tries>=25)clearInterval(iv);ticking=false},4000)}
 function refreshActiveData(){const cur=document.querySelector(".screen.on");if(!cur)return;if(cur.id==="dash")loadDash();else if(cur.id==="reports")loadReports();else if(cur.id==="protocol")loadProtocol()}
 function askCouncil(q){location.hash="#council";go("council");setTimeout(()=>{const t=document.getElementById("cta");if(t){t.value=q;grow();sendMsg()}},250)}
 
@@ -571,8 +570,9 @@ function obCard(st,medsCount){
 async function obUpload(files){const host=document.getElementById("obProg");const res=await uploadHealthFiles(Array.from(files),null,host);
  const n=res.extractions.reduce((a,e)=>a+e.markers.length,0);
  if(n){toast("تم استخراج "+n+" مؤشر — تحدّثت مؤشراتك","ok");loadDash()}
- else if(res.saved||res.dup){toast("تم الرفع — جارٍ قراءة الملف في الخلفية…");pollDocuments(res.pendingIds)}
- else toast("لم يُرفع أي ملف","err")}
+ else if(res.saved||res.dup)toast("تم الرفع — جارٍ قراءة الملف في الخلفية…");
+ else toast("لم يُرفع أي ملف","err");
+ if(res.pendingIds.length)pollDocuments(res.pendingIds)}
 async function loadDash(){const view=document.getElementById("dash");view.innerHTML=skeleton(4);
  const r=await api("/api/dashboard");const d=(r.ok&&r.data)||{};const st=d.stats||{};
  let signals=(d.health_signals||[]).map(s=>({label:s.label,value:s.latest_value,numeric:s.latest_numeric,unit:s.unit,range:s.reference_range,status:s.status,status_label:s.status_label,pct:s.pct,summary:s.summary}));

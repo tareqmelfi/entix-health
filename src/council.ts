@@ -125,14 +125,15 @@ async function callOpenAI(model: string, system: string, user: string, timeoutMs
 
 async function callGemini(model: string, system: string, user: string, timeoutMs: number) {
   if (!config.GEMINI_API_KEY) throw new Error("gemini_key_missing");
+  // Key travels in a header (never in the URL) so it can't leak into proxy logs.
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     model
-  )}:generateContent?key=${config.GEMINI_API_KEY}`;
+  )}:generateContent`;
   const r = await fetchJsonWithTimeout(
     url,
     {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-goog-api-key": config.GEMINI_API_KEY },
       body: JSON.stringify({
         system_instruction: { parts: [{ text: system }] },
         contents: [{ role: "user", parts: [{ text: user }] }]
@@ -149,14 +150,16 @@ async function callGemini(model: string, system: string, user: string, timeoutMs
 }
 
 // Generalised web search — receives NO patient data, only a neutral medical query.
-// Strip potential PHI before any third-party call: emails, phones, IDs, dates,
-// and measured values/numbers. Only the medical terms of the question survive.
+// Strip potential PHI before any third-party call: emails, phones, dates, and
+// measured lab values (number + unit). Medical terms like "B12" or "Type 2
+// diabetes" survive — only standalone identifying/measured numbers are removed.
 function sanitizeSearchQuery(message: string): string {
   return message
     .replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, " ")
     .replace(/\+?\d[\d\s().-]{6,}\d/g, " ")
     .replace(/\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/g, " ")
-    .replace(/\d+(?:[.,]\d+)?/g, " ")
+    .replace(/\d+(?:[.,]\d+)?\s*(?:ng\/mL|mg\/dL|g\/dL|mmol\/L|µ?IU\/m?L|pg\/mL|nmol\/L|mcg|mg|kg|%)/gi, " ")
+    .replace(/(?<![A-Za-z-])\d{4,}(?:[.,]\d+)?(?![A-Za-z])/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 220);

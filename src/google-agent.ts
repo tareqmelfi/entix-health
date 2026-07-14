@@ -45,7 +45,8 @@ export async function runGoogleAgent(input: GoogleAgentInput): Promise<GoogleAge
   if (!apiKey) throw new Error("google_agent_key_missing");
 
   const model = config.GOOGLE_AGENT_MODEL;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${apiKey}`;
+  // Key travels in a header (never in the URL) so it can't leak into proxy logs.
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
   const user = [
     `ملخص الملف الصحي (خاص — لا يُرسل لأي طرف ثالث):\n${memorySummary(input.memoryContext)}`,
     `سؤال المستخدم:\n${input.userMessage}`
@@ -57,7 +58,7 @@ export async function runGoogleAgent(input: GoogleAgentInput): Promise<GoogleAge
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
       signal: controller.signal,
       body: JSON.stringify({
         system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
