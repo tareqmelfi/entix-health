@@ -748,13 +748,13 @@ async function logout(){await api("/api/logout",{method:"POST"});showLanding()}
 
 function enterApp(m){if(STATE.authed){show(true);route()}else showAuth(m)}
 function openLegal(id){killSplash();var map={privacy:"legal-privacy",terms:"legal-terms"};var sec=document.getElementById(map[id]||id);if(!sec)return false;document.getElementById("landing").classList.add("hidden");document.getElementById("auth").classList.add("hidden");document.getElementById("app").classList.add("hidden");document.querySelectorAll(".legal-page").forEach(function(s){s.classList.add("hidden")});sec.classList.remove("hidden");window.scrollTo(0,0);return false}
-function backFromLegal(){var h=location.hash;if(h==="#privacy"||h==="#terms"){location.hash="#home"}showLanding();return false}
+function backFromLegal(){var h=location.hash;if(h==="#privacy"||h==="#terms"){location.hash="#home"}document.querySelectorAll(".legal-page").forEach(function(s){s.classList.add("hidden")});showLanding();return false}
 function lp(id){return openLegal(id)}
 async function boot(){try{var h=location.hash;if(h==="#privacy"){showLanding();openLegal("privacy");return}if(h==="#terms"){showLanding();openLegal("terms");return}const r=await api("/api/bootstrap");if(!r.ok){showLanding();return}STATE.user=r.data;STATE.authed=true;const em=(r.data&&(r.data.email||(r.data.user&&r.data.user.email)))||"T";document.getElementById("avatar").textContent=(em[0]||"T").toUpperCase();if(h==="#home"){showLanding();return}show(true);route()}catch(e){showLanding()}}
 // Failsafe: never leave the splash logo stuck — whatever happens, show the landing.
 setTimeout(function(){if(document.getElementById("splash"))showLanding()},6000);
 function killSplash(){var s=document.getElementById("splash");if(s)s.remove()}
-function showLanding(){killSplash();document.getElementById("landing").classList.remove("hidden");document.getElementById("auth").classList.add("hidden");document.getElementById("app").classList.add("hidden")}
+function showLanding(){killSplash();document.getElementById("landing").classList.remove("hidden");document.getElementById("auth").classList.add("hidden");document.getElementById("app").classList.add("hidden");document.querySelectorAll(".legal-page").forEach(function(s){s.classList.add("hidden")})}
 function showAuth(m){killSplash();if(m)setMode(m);document.getElementById("landing").classList.add("hidden");document.getElementById("auth").classList.remove("hidden");document.getElementById("app").classList.add("hidden")}
 function show(li){killSplash();document.getElementById("landing").classList.add("hidden");document.getElementById("auth").classList.toggle("hidden",li);document.getElementById("app").classList.toggle("hidden",!li)}
 function go(id,el){location.hash="#"+id;document.querySelectorAll(".screen").forEach(s=>s.classList.remove("on"));document.getElementById(id).classList.add("on");document.querySelectorAll(".rail .ic").forEach(b=>b.classList.toggle("on",b.dataset.s===id));if(id===STATE._cur)return;STATE._cur=id;if(id==="dash")loadDash();if(id==="council")loadCouncil();if(id==="reports")loadReports();if(id==="protocol")loadProtocol();}
