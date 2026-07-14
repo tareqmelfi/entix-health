@@ -471,7 +471,7 @@ body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-
 
 <script>
 const API="";let STATE={user:null,convId:null,busy:false,files:[]};
-async function api(p,o={}){const r=await fetch(API+p,{credentials:"include",headers:{"Content-Type":"application/json"},...o});let d=null;const t=await r.text();try{d=t?JSON.parse(t):null}catch{d={raw:t}}return{ok:r.ok,status:r.status,data:d}}
+async function api(p,o={}){try{const r=await fetch(API+p,{credentials:"include",headers:{"Content-Type":"application/json"},...o});let d=null;const t=await r.text();try{d=t?JSON.parse(t):null}catch{d={raw:t}}return{ok:r.ok,status:r.status,data:d}}catch(e){return{ok:false,status:0,data:{error:"network_error"}}}}
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]))}
 
 /* ===== shared UX helpers: toasts · skeletons · unified upload ===== */
@@ -518,7 +518,9 @@ async function logout(){await api("/api/logout",{method:"POST"});showLanding()}
 
 function enterApp(m){if(STATE.authed){show(true);route()}else showAuth(m)}
 function lp(id){const d=document.getElementById(id);if(d){d.open=true;d.scrollIntoView({behavior:"smooth",block:"center"})}return false}
-async function boot(){const r=await api("/api/bootstrap");if(!r.ok){showLanding();return}STATE.user=r.data;STATE.authed=true;const em=(r.data&&(r.data.email||(r.data.user&&r.data.user.email)))||"T";document.getElementById("avatar").textContent=(em[0]||"T").toUpperCase();if(location.hash==="#home"){showLanding();return}show(true);route()}
+async function boot(){try{const r=await api("/api/bootstrap");if(!r.ok){showLanding();return}STATE.user=r.data;STATE.authed=true;const em=(r.data&&(r.data.email||(r.data.user&&r.data.user.email)))||"T";document.getElementById("avatar").textContent=(em[0]||"T").toUpperCase();if(location.hash==="#home"){showLanding();return}show(true);route()}catch(e){showLanding()}}
+// Failsafe: never leave the splash logo stuck — whatever happens, show the landing.
+setTimeout(function(){if(document.getElementById("splash"))showLanding()},6000);
 function killSplash(){var s=document.getElementById("splash");if(s)s.remove()}
 function showLanding(){killSplash();document.getElementById("landing").classList.remove("hidden");document.getElementById("auth").classList.add("hidden");document.getElementById("app").classList.add("hidden")}
 function showAuth(m){killSplash();if(m)setMode(m);document.getElementById("landing").classList.add("hidden");document.getElementById("auth").classList.remove("hidden");document.getElementById("app").classList.add("hidden")}
