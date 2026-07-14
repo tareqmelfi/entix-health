@@ -6,7 +6,7 @@ const EnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
   HMDB_API_SECRET: z.string().min(32),
   APP_SESSION_SECRET: z.string().min(32),
-  TPER_HEALTH_ACCESS_CODE: z.string().min(8),
+  TPER_HEALTH_ACCESS_CODE: z.string().min(8).optional(),
   HMDB_DEFAULT_PERSON_SLUG: z.string().default("tareq"),
   HMDB_FILES_DIR: z.string().default("/data/health-memory/files"),
   HMDB_EXPORT_DIR: z.string().default("/data/health-memory/exports"),
@@ -31,6 +31,11 @@ const EnvSchema = z.object({
   OPENROUTER_API_KEY: z.string().optional(),
   OPENROUTER_PHI_ENABLED: z.string().default("false"),
   SERPER_API_KEY: z.string().optional(),
+  // Google-only agent — served from the dedicated entix-health GCP project.
+  // Uses Gemini exclusively with native Google Search grounding.
+  GOOGLE_HEALTH_PROJECT: z.string().optional(),
+  GOOGLE_AGENT_GEMINI_KEY: z.string().optional(),
+  GOOGLE_AGENT_MODEL: z.string().default("gemini-3.5-flash"),
   // In-API doctor council (multi-model orchestrator). Model IDs are env-driven
   // so they can be swapped to newer releases without code changes.
   COUNCIL_ENABLED: z.string().default("true"),

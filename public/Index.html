@@ -282,6 +282,67 @@ body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-
 .pc-sec{margin-top:12px}
 .pc-seclbl{display:block;font-size:11px;font-weight:800;color:var(--violet);margin-bottom:4px}
 .pc-sec p{margin:0;font-size:12.5px;color:#334155;line-height:1.75}
+
+/* ===== UX v2 — toasts · skeletons · onboarding · conversations · mobile ===== */
+.toasts{position:fixed;bottom:26px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:8px;z-index:9990;pointer-events:none}
+.toast{pointer-events:auto;display:flex;align-items:center;gap:9px;background:var(--navy);color:#fff;border-radius:14px;padding:12px 20px;font-size:13px;font-weight:700;box-shadow:0 14px 40px rgba(10,15,40,.35);animation:tIn .3s cubic-bezier(.16,1,.3,1)}
+.toast.ok{background:#14532d}.toast.err{background:#7f1d1d}
+@keyframes tIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.sk{position:relative;overflow:hidden;background:#eef1f6;border-radius:12px}
+.sk::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);animation:skm 1.4s infinite}
+@keyframes skm{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+.sk-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px;margin-top:18px}
+.sk-card{height:180px;border-radius:var(--r2)}
+.sk-line{height:16px;margin-bottom:10px}
+.ob{background:#fff;border-radius:var(--r);box-shadow:var(--sh);padding:30px;margin-bottom:26px}
+.ob-h{font-size:22px;font-weight:800;margin:0 0 6px;letter-spacing:-.3px}
+.ob-sub{color:var(--muted);font-size:13.5px;margin:0 0 20px;line-height:1.8}
+.ob-steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.ob-step{border:1px solid var(--line);border-radius:var(--r2);padding:18px;transition:.15s}
+.ob-step.done{background:#f0fdf4;border-color:#bbf7d0}
+.ob-n{width:30px;height:30px;border-radius:10px;background:var(--violet-soft);color:var(--violet);font-weight:800;display:flex;align-items:center;justify-content:center;margin-bottom:10px}
+.ob-step.done .ob-n{background:#22c55e;color:#fff}
+.ob-step b{font-size:14.5px}.ob-step p{margin:6px 0 0;color:var(--muted);font-size:12.5px;line-height:1.7}
+.ob-drop{margin-top:16px;border:2px dashed var(--line);border-radius:var(--r2);padding:28px;text-align:center;color:var(--muted);font-size:13.5px;cursor:pointer;transition:.15s;line-height:1.8}
+.ob-drop:hover,.ob-drop.drag{border-color:var(--violet);background:var(--violet-soft);color:var(--violet)}
+.qchips{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.qchip{border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:999px;padding:10px 16px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;transition:.15s}
+.qchip:hover{border-color:var(--violet);color:var(--violet);background:var(--violet-soft)}
+.upprog{display:flex;align-items:center;gap:9px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px 15px;font-size:12.5px;font-weight:700;color:var(--muted);margin:8px 0}
+.upprog .spin{border-color:#c7d2fe;border-top-color:var(--violet)}
+.conv{display:flex;align-items:center;gap:6px}
+.conv .cvt{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.conv .cva{display:none;flex:none;gap:2px}
+.conv:hover .cva,.conv.on .cva{display:flex}
+.cva button{border:0;background:transparent;color:var(--dim);cursor:pointer;font-size:12px;padding:3px 6px;border-radius:6px;font-family:inherit}
+.cva button:hover{background:var(--violet-soft);color:var(--violet)}
+.cva button.del:hover{background:var(--alert-bg);color:var(--alert)}
+.cgrp{font-size:10.5px;font-weight:800;letter-spacing:1px;color:var(--dim);text-transform:uppercase;margin:14px 6px 7px}
+.mc.warnb{background:#fff7ed;color:#9a3412;box-shadow:none;border:1px solid #fed7aa}.mc.warnb .dotc{background:#f97316}
+.retryb{border:1px solid var(--line);background:#fff;color:var(--violet);border-radius:9px;padding:5px 12px;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit}
+.retryb:hover{border-color:var(--violet);background:var(--violet-soft)}
+.convtoggle{display:none;border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:10px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;margin-inline-start:auto}
+@media(max-width:900px){
+ .convtoggle{display:inline-flex}
+ .cside{position:fixed;inset:0;bottom:0;background:rgba(248,250,252,.98);z-index:60;padding:20px 18px;overflow-y:auto}
+ .cside.open{display:block}
+}
+@media(max-width:700px){
+ .app{flex-direction:column}
+ .rail{position:fixed;bottom:0;top:auto;left:0;right:0;width:100%;height:66px;flex-direction:row;justify-content:space-around;align-items:center;padding:6px 10px;box-shadow:0 -1px 0 var(--line)}
+ .rail .logo,.rail .sp,.rail .av{display:none}
+ .rail .ic{margin-bottom:0;width:46px;height:46px}
+ .main{padding:20px 16px 110px;max-width:100%}
+ .h1{font-size:27px}
+ #council.on{height:calc(100vh - 170px)}
+ .cside{bottom:66px}
+ .bub{max-width:94%}
+ .dalerts{grid-template-columns:1fr}
+ .rep-stats{grid-template-columns:repeat(2,1fr)}
+ .head{flex-direction:column}
+ .toasts{bottom:84px;width:calc(100% - 32px)}
+}
+
 </style>
 </head>
 <body>
@@ -381,9 +442,9 @@ body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-
       <div class="council-stage">
         <div class="orbs"><div class="orb a"></div><div class="orb b"></div><div class="orb c"></div></div>
         <div class="cglass">
-          <div class="cside"><button class="new" onclick="newChat()"><svg class="ico"><use href="#i-plus"/></svg> محادثة جديدة</button><div id="convList"></div></div>
+          <div class="cside" id="cside"><button class="new" onclick="newChat()"><svg class="ico"><use href="#i-plus"/></svg> محادثة جديدة</button><div id="convList"></div></div>
           <div class="cmain">
-            <div class="chead"><span class="lv"></span> مجلس الأطباء — باحث · طبيب · مدقّق · سلامة <span class="csub">· ذاكرة عابرة للجلسات</span></div>
+            <div class="chead"><span class="lv"></span> مجلس الأطباء — باحث · طبيب · مدقّق · سلامة <span class="csub">· ذاكرة عابرة للجلسات</span><button class="convtoggle" onclick="toggleConvs()">☰ المحادثات</button></div>
             <div class="cscroll" id="cscroll"></div>
             <div class="composer">
               <div class="cbox" id="cbox">
@@ -406,11 +467,43 @@ body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-
     <section id="reports" class="screen"><div class="empty">جارٍ التحميل…</div></section>
   </main>
 </div>
+<div class="toasts" id="toasts"></div>
 
 <script>
 const API="";let STATE={user:null,convId:null,busy:false,files:[]};
 async function api(p,o={}){const r=await fetch(API+p,{credentials:"include",headers:{"Content-Type":"application/json"},...o});let d=null;const t=await r.text();try{d=t?JSON.parse(t):null}catch{d={raw:t}}return{ok:r.ok,status:r.status,data:d}}
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]))}
+
+/* ===== shared UX helpers: toasts · skeletons · unified upload ===== */
+function toast(msg,cls){const c=document.getElementById("toasts");if(!c)return;const t=document.createElement("div");t.className="toast "+(cls||"");t.textContent=msg;c.appendChild(t);setTimeout(()=>{t.style.opacity="0";t.style.transition="opacity .3s";setTimeout(()=>t.remove(),320)},4200)}
+function skeleton(n){let s='<div class="sk sk-line" style="width:38%"></div><div class="sk sk-line" style="width:60%"></div><div class="sk-row">';for(let i=0;i<(n||4);i++)s+='<div class="sk sk-card"></div>';return s+"</div>"}
+function toggleConvs(){const s=document.getElementById("cside");if(s)s.classList.toggle("open")}
+// Unified upload used by chat + reports + onboarding. Returns {saved,duplicates,extractions,pendingIds}.
+async function uploadHealthFiles(files,convId,progressHost){
+ let saved=0,dup=0;const extractions=[],pendingIds=[];
+ for(const f of files){
+  let prog=null;
+  if(progressHost){prog=document.createElement("div");prog.className="upprog";prog.innerHTML='<span class="spin"></span> جارٍ رفع وقراءة: '+esc(f.name.slice(0,36))+"…";progressHost.appendChild(prog);sd()}
+  const fd=new FormData();fd.append("file",f);if(convId)fd.append("conversation_id",convId);
+  try{const up=await fetch("/api/documents",{method:"POST",credentials:"include",body:fd});const uj=await up.json().catch(()=>null);
+   if(uj){dup+=uj.duplicates||0;saved+=uj.saved||0;(uj.results||[]).forEach(rr=>{if(!rr)return;
+    if(rr.extraction&&rr.extraction.markers&&rr.extraction.markers.length)extractions.push(rr.extraction);
+    else if(rr.ocr_status==="queued"&&rr.document&&rr.document.id)pendingIds.push(rr.document.id)})}
+  }catch{toast("تعذّر رفع "+f.name.slice(0,26),"err")}
+  if(prog)prog.remove();
+ }
+ return{saved,dup,extractions,pendingIds}}
+// Poll queued OCR docs so the user knows when markers land, then refresh views.
+function pollDocuments(ids){if(!ids||!ids.length)return;let tries=0;
+ const iv=setInterval(async()=>{tries++;let allDone=true;
+  for(const id of ids.slice()){const r=await api("/api/documents/"+id+"/status");const d=r.ok&&r.data;
+   if(d&&d.done){ids.splice(ids.indexOf(id),1);
+    if(d.markers_extracted>0){toast("تم استخراج "+d.markers_extracted+" مؤشر من «"+(d.title||"تقريرك")+"» — تحدّثت مؤشراتك ✓","ok");refreshActiveData()}
+    else if(d.ocr_status==="failed")toast("تعذّرت قراءة «"+(d.title||"الملف")+"» تلقائياً — جرّب صورة أوضح","err")}
+   else if(d)allDone=false}
+  if(!ids.length||tries>=25){clearInterval(iv);if(ids.length===0&&allDone)refreshActiveData()}},4000)}
+function refreshActiveData(){const cur=document.querySelector(".screen.on");if(!cur)return;if(cur.id==="dash")loadDash();else if(cur.id==="reports")loadReports();else if(cur.id==="protocol")loadProtocol()}
+function askCouncil(q){location.hash="#council";go("council");setTimeout(()=>{const t=document.getElementById("cta");if(t){t.value=q;grow();sendMsg()}},250)}
 
 /* auth */
 let mode="login";
@@ -454,14 +547,39 @@ function showMarker(l){setDashHidden(dashHidden().filter(function(x){return x!==
 function clearHidden(){setDashHidden([]);loadDash()}
 function toggleCustomize(){STATE.dashCustomize=!STATE.dashCustomize;loadDash()}
 function czBar(full,hidden){var btn='<div class="cz-head"><button class="cz-btn '+(STATE.dashCustomize?"on":"")+'" onclick="toggleCustomize()"><svg class="ico"><use href="#i-spacing"/></svg> تخصيص الداشبورد</button>'+(hidden.length?'<button class="cz-restore" onclick="clearHidden()">إظهار المخفية ('+hidden.length+')</button>':"")+'</div>';if(!STATE.dashCustomize)return btn;var rows=full.map(function(sg){var h=hidden.indexOf(sg.label)>=0;var arg=String(sg.label||"").replace(/[\x27\x22\\]/g,"");return '<div class="cz-row '+(h?"off":"")+'"><span>'+esc(sg.label||"—")+'</span><button onclick="'+(h?"showMarker":"hideMarker")+'(\x27'+arg+'\x27)">'+(h?"إظهار":"إخفاء")+'</button></div>';}).join("");return btn+'<div class="cz-panel"><div class="cz-ptitle">اختر المؤشرات الظاهرة — تنطبق على البطاقات والسجل · Choose visible markers</div>'+rows+'</div>';}
-async function loadDash(){const view=document.getElementById("dash");view.innerHTML='<div class="empty">جارٍ تحميل مؤشراتك…</div>';
+function obCard(st,medsCount){
+ const s1=(st.documents||0)>0,s2=localStorage.getItem("entix_asked")==="1",s3=medsCount>0;
+ return `<div class="ob">
+  <h2 class="ob-h">أهلاً بك — لنبنِ ملفك الصحي في ثلاث خطوات</h2>
+  <p class="ob-sub">ارفع أول تحليل وسيُقرأ بصرياً وتظهر مؤشراتك هنا، ثم اسأل المجلس عنها، ويتكوّن بروتوكولك تلقائياً.</p>
+  <div class="ob-steps">
+   <div class="ob-step ${s1?"done":""}"><div class="ob-n">${s1?"✓":"1"}</div><b>ارفع أول تحليل</b><p>PDF أو صورة — استخراج فوري للمؤشرات عبر القراءة البصرية وOCR.</p></div>
+   <div class="ob-step ${s2?"done":""}"><div class="ob-n">${s2?"✓":"2"}</div><b>اسأل مجلس الأطباء</b><p>باحث ← طبيب سريري ← مدقّق سلامة — بنسبة ثقة ومصادر.</p></div>
+   <div class="ob-step ${s3?"done":""}"><div class="ob-n">${s3?"✓":"3"}</div><b>بروتوكولك الشخصي</b><p>جرعات وتوقيتات ومباعدة دوائية تتكوّن تلقائياً من ملفك.</p></div>
+  </div>
+  <div class="ob-drop" onclick="document.getElementById('obInp').click()"
+   ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')"
+   ondrop="event.preventDefault();this.classList.remove('drag');if(event.dataTransfer.files.length)obUpload(event.dataTransfer.files)">
+   اسحب تحليلك هنا أو اضغط للاختيار<br><span style="font-size:12px">يقبل PDF وصور — عربي وإنجليزي</span></div>
+  <input type="file" id="obInp" class="hidden" multiple onchange="obUpload(this.files)">
+  <div id="obProg"></div>
+  <div class="qchips">
+   <button class="qchip" onclick="askCouncil('حلّل تحاليلي الأخيرة واشرح لي كل مؤشر')">حلّل تحاليلي الأخيرة</button>
+   <button class="qchip" onclick="askCouncil('هل عندي نقص فيتامينات أو معادن حسب ملفي؟')">هل عندي نقص فيتامينات؟</button>
+   <button class="qchip" onclick="askCouncil('ما أهم ثلاث أولويات صحية عندي الآن؟')">ما أولوياتي الصحية؟</button>
+  </div></div>`}
+async function obUpload(files){const host=document.getElementById("obProg");const res=await uploadHealthFiles(Array.from(files),null,host);
+ const n=res.extractions.reduce((a,e)=>a+e.markers.length,0);
+ if(n){toast("تم استخراج "+n+" مؤشر — تحدّثت مؤشراتك","ok");loadDash()}
+ else if(res.saved||res.dup){toast("تم الرفع — جارٍ قراءة الملف في الخلفية…");pollDocuments(res.pendingIds)}
+ else toast("لم يُرفع أي ملف","err")}
+async function loadDash(){const view=document.getElementById("dash");view.innerHTML=skeleton(4);
  const r=await api("/api/dashboard");const d=(r.ok&&r.data)||{};const st=d.stats||{};
  let signals=(d.health_signals||[]).map(s=>({label:s.label,value:s.latest_value,numeric:s.latest_numeric,unit:s.unit,range:s.reference_range,status:s.status,status_label:s.status_label,pct:s.pct,summary:s.summary}));
  // signals with a real measured value first; keep up to 8
  signals.sort((a,b)=>((b.numeric!=null||(b.value!=null&&String(b.value).trim()))?1:0)-((a.numeric!=null||(a.value!=null&&String(a.value).trim()))?1:0));
  const fullSignals=signals.slice();const hidden=dashHidden();const allSignals=fullSignals.filter(function(s){return hidden.indexOf(s.label)<0});signals=allSignals.slice(0,8);
  const has=signals.some(s=>s.numeric!=null||(s.value!=null&&String(s.value).trim()));
- if(!has)signals=[{label:"ابدأ برفع تقرير",value:"—",unit:"لا مؤشرات بعد",status:"pending",pct:8}];
  const alerts=(d.risk_alerts||[]).slice(0,2);
  const meds=(d.medications||[]).concat(d.supplements||[]).slice(0,3);
  view.innerHTML=`
@@ -470,25 +588,31 @@ async function loadDash(){const view=document.getElementById("dash");view.innerH
     <h1 class="h1">مؤشراتي الحيوية</h1>
     <div class="subline"><svg class="ico"><use href="#i-db"/></svg> قاعدة بيانات بيولوجية محقّقة — ${st.lab_markers||0} مؤشر · ${st.documents||0} ملف · ${st.reports||0} تقرير.</div>
   </div><div class="dbpill"><svg class="ico"><use href="#i-shieldcheck"/></svg> قاعدة بيانات آمنة · Secured</div></div>
-  <div class="divider"></div>${czBar(fullSignals,hidden)}
-  <div class="bigcard"><div class="kicker"><svg class="ico"><use href="#i-activity"/></svg> المؤشرات المخبرية <span class="kicker-en">Lab Biochemical Indices</span></div>
+  <div class="divider"></div>${has?czBar(fullSignals,hidden):""}
+  ${has?`<div class="bigcard"><div class="kicker"><svg class="ico"><use href="#i-activity"/></svg> المؤشرات المخبرية <span class="kicker-en">Lab Biochemical Indices</span></div>
    <p class="lead">قياسات نشطة مترجمة من تقاريرك السريرية ومربوطة بالمعايير الصحية:</p>
-   <div class="gauges">${signals.map(gauge).join("")}</div></div>
+   <div class="gauges">${signals.map(gauge).join("")}</div></div>`:obCard(st,meds.length)}
   ${(has&&alerts.length)?`<div class="dark"><div class="dhead"><div class="ib"><svg class="ico"><use href="#i-steward"/></svg></div><div><div class="ke">التحليل السريري والإشراف الطبي · Clinical Analysis</div><h2>التحليل السريري والإشراف الطبي</h2></div></div>
    <div class="dalerts">${alerts.map(a=>`<div class="dalert"><div class="ex"><svg class="ico"><use href="#i-alert"/></svg></div><div><h4>${esc(a.title)}</h4><p>${esc(a.detail||"")}</p></div></div>`).join("")}</div></div>`:""}
   ${meds.length?`<div class="cardp"><div class="spx-h"><div class="pb"><svg class="ico"><use href="#i-spacing"/></svg></div><div><div class="ke">المباعدة الدوائية · Active Spacing</div><b>روتين الجرعات المتباعدة</b></div></div>
    ${meds.map(m=>`<div class="med"><div class="mt"><b>${esc(m.name||"-")}</b>${m.dose?`<span class="badge">${esc(m.dose)}</span>`:""}</div><p>${esc([m.frequency,m.timing].filter(Boolean).join(" · ")||"")}</p></div>`).join("")}</div>`:""}
-  ${has?`<div class="labt" style="margin-top:22px"><div class="labt-h2"><h3 class="labt-t2">سجل المؤشرات الشامل · Full Marker Log</h3><p class="labt-sub2">جميع المؤشرات المقروءة من فحوصاتك — بالحالة والنطاق والشرح.</p></div>${modernTable(allSignals.map(s=>({ar:s.label,en:"",val:(s.numeric!=null?s.numeric:s.value),num:s.numeric,unit:s.unit,range:s.range,flag:s.status,slabel:s.status_label,explain:s.summary,exl:(s.interpretation||"")})))}</div>`:""}
-  ${!has?'<div class="empty" style="margin-top:6px">ما فيه مؤشرات بعد — افتح «التقارير» وارفع تحليلك، أو اسأل «مجلس الأطباء» وألصق نتائجك، ونستخرجها تلقائياً عبر OCR.</div>':""}`;
+  ${has?`<div class="labt" style="margin-top:22px"><div class="labt-h2"><h3 class="labt-t2">سجل المؤشرات الشامل · Full Marker Log</h3><p class="labt-sub2">جميع المؤشرات المقروءة من فحوصاتك — بالحالة والنطاق والشرح.</p></div>${modernTable(allSignals.map(s=>({ar:s.label,en:"",val:(s.numeric!=null?s.numeric:s.value),num:s.numeric,unit:s.unit,range:s.range,flag:s.status,slabel:s.status_label,explain:s.summary,exl:(s.interpretation||"")})))}</div>`:""}`;
 }
 
 /* COUNCIL */
+function convGroup(c){const t=new Date(c.last_message_at||c.created_at||Date.now());const now=new Date();const d0=new Date(now.getFullYear(),now.getMonth(),now.getDate());if(t>=d0)return"اليوم";if(t>=new Date(d0.getTime()-6*864e5))return"هذا الأسبوع";return"أقدم"}
 async function loadCouncil(){grow();const r=await api("/api/conversations");const list=(r.data&&(r.data.conversations||r.data.data))||[];
- const cl=document.getElementById("convList");cl.innerHTML=(Array.isArray(list)?list:[]).slice(0,30).map(c=>`<div class="conv ${c.id===STATE.convId?'on':''}" onclick="openConv('${c.id}')">${esc(c.title||"محادثة")}</div>`).join("")||'<div style="color:#7a86ad;font-size:12px;padding:8px">لا محادثات بعد</div>';
- if(!STATE.convId&&Array.isArray(list)&&list[0]){openConv(list[0].id)}else if(!STATE.convId){welcome()}}
-function welcome(){document.getElementById("cscroll").innerHTML=`<div class="bub ai"><div class="md">${mdToHtml("أهلاً فيك 👋 أنا واجهتك لمجلس Entix الصحي.\nاكتب سؤالك أو أرفق تحاليلك وصورك — وراح يمر سؤالك على: باحث (أدلة) ← طبيب سريري ← مدقّق سلامة، بنسبة ثقة ومصادر.\nوذاكرتي عابرة: أتذكّر محادثاتك السابقة وأربط عليها.")}</div></div>`}
+ const cl=document.getElementById("convList");const arr=Array.isArray(list)?list.slice(0,40):[];
+ let html="",lastG=null;
+ arr.forEach(c=>{const g=convGroup(c);if(g!==lastG){html+='<div class="cgrp">'+g+'</div>';lastG=g}
+  html+=`<div class="conv ${c.id===STATE.convId?'on':''}" onclick="openConv('${c.id}')"><span class="cvt">${esc(c.title||"محادثة")}</span><span class="cva"><button title="إعادة تسمية" onclick="event.stopPropagation();renameConv('${c.id}')">✎</button><button class="del" title="حذف" onclick="event.stopPropagation();deleteConv('${c.id}')">✕</button></span></div>`});
+ cl.innerHTML=html||'<div style="color:#7a86ad;font-size:12px;padding:8px">لا محادثات بعد</div>';
+ if(!STATE.convId&&arr[0]){openConv(arr[0].id)}else if(!STATE.convId){welcome()}}
+async function renameConv(id){const t=prompt("العنوان الجديد للمحادثة:");if(!t||!t.trim())return;const r=await api("/api/conversations/"+id,{method:"PATCH",body:JSON.stringify({title:t.trim().slice(0,120)})});if(r.ok){toast("تمت إعادة التسمية","ok");loadCouncil()}else toast("تعذّرت إعادة التسمية","err")}
+async function deleteConv(id){if(!confirm("حذف هذه المحادثة من قائمتك؟"))return;const r=await api("/api/conversations/"+id,{method:"PATCH",body:JSON.stringify({status:"archived"})});if(r.ok){if(STATE.convId===id){STATE.convId=null;welcome()}toast("تم حذف المحادثة","ok");loadCouncil()}else toast("تعذّر الحذف","err")}
+function welcome(){document.getElementById("cscroll").innerHTML=`<div class="bub ai"><div class="md">${mdToHtml("أهلاً فيك — أنا واجهتك لمجلس Entix الصحي.\nاكتب سؤالك أو أرفق تحاليلك وصورك — وراح يمر سؤالك على: باحث (أدلة) ← طبيب سريري ← مدقّق سلامة، بنسبة ثقة ومصادر.\nوذاكرتي عابرة: أتذكّر محادثاتك السابقة وأربط عليها.")}</div><div class="qchips"><button class="qchip" onclick="askCouncil('حلّل تحاليلي الأخيرة واشرح لي كل مؤشر')">حلّل تحاليلي الأخيرة</button><button class="qchip" onclick="askCouncil('هل عندي نقص فيتامينات أو معادن حسب ملفي؟')">هل عندي نقص فيتامينات؟</button><button class="qchip" onclick="askCouncil('راجع أدويتي ومكملاتي وتعارضاتها')">راجع أدويتي وتعارضاتها</button></div></div>`}
 function newChat(){STATE.convId=null;welcome();document.querySelectorAll(".conv").forEach(c=>c.classList.remove("on"))}
-async function openConv(id){STATE.convId=id;document.querySelectorAll(".conv").forEach(c=>c.classList.remove("on"));const m=await api("/api/conversations/"+id+"/messages");const msgs=(m.data&&(m.data.messages||m.data.data))||[];const sc=document.getElementById("cscroll");sc.innerHTML="";if(Array.isArray(msgs)&&msgs.length)msgs.forEach(x=>bubble(x.role==="user"?"me":"ai",x.body,x.metadata));else welcome();sd();loadCouncilList()}
+async function openConv(id){STATE.convId=id;const cs=document.getElementById("cside");if(cs)cs.classList.remove("open");document.querySelectorAll(".conv").forEach(c=>c.classList.remove("on"));const m=await api("/api/conversations/"+id+"/messages");const msgs=(m.data&&(m.data.messages||m.data.data))||[];const sc=document.getElementById("cscroll");sc.innerHTML="";if(Array.isArray(msgs)&&msgs.length)msgs.forEach(x=>bubble(x.role==="user"?"me":"ai",x.body,x.metadata));else welcome();sd();loadCouncilList()}
 function loadCouncilList(){document.querySelectorAll(".conv").forEach(c=>c.classList.toggle("on",c.getAttribute("onclick").includes(STATE.convId||"___")))}
 function confCls(c){return c>=80?"hi":c>=60?"mid":"lo"}
 function mdInline(t){return t.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/`([^`]+)`/g,'<code>$1</code>').replace(/(\(?\d[\d.,]*\s?(?:ng\/mL|mg\/dL|g\/dL|mmol\/L|mIU\/L|µIU\/mL|IU|mcg|mg|%|كجم|kg)\)?)/g,'<span class="hl-num">$1</span>')}
@@ -497,6 +621,7 @@ function bubble(side,body,meta,files){const sc=document.getElementById("cscroll"
  if(files&&files.length)h+=`<div class="files">${files.map(f=>{const isImg=f&&f.type&&typeof f.type==="string"&&f.type.startsWith("image/");const nm=typeof f==="string"?f:(f&&f.name)||"ملف";return isImg?`<img class="fimg" src="${URL.createObjectURL(f)}" alt="">`:`<span class="fchip"><svg class="ico"><use href="#i-clip"/></svg> ${esc(nm)}</span>`}).join("")}</div>`;
  h+= side==="ai" ? `<div class="md">${mdToHtml(body)}</div>` : esc(body);
  if(side==="ai"&&meta){let ex="";
+  if(meta.n8n&&meta.n8n.fallback_used&&meta.n8n.council_failed)ex+='<span class="mc warnb"><span class="dotc"></span>وضع محدود — تعذّر وصول المجلس الكامل</span>';
   if(meta.mode==="direct"||(meta.council&&meta.council.mode==="direct")){ex+='<span class="modeb"><span class="dotc" style="background:#7fd0ff"></span>رد مباشر</span>';}
   else{
    if(typeof meta.confidence==="number"&&meta.confidence>=0)ex+=`<span class="conf ${confCls(meta.confidence)}">ثقة ${meta.confidence}%</span>`;
@@ -533,18 +658,22 @@ async function sendMsg(){if(STATE.busy)return;const t=document.getElementById("c
  const analyze=files.length>0||isDiagnostic(q);
  STATE.busy=true;document.getElementById("csend").disabled=true;t.value="";grow();
  bubble("me",q,null,files);
- if(files.length){const dd=document.createElement("div");dd.className="delib";dd.id="delib";dd.innerHTML='<b><span class="spin"></span> جارٍ رفع المرفقات وقراءتها بصرياً (Vision)…</b>';document.getElementById("cscroll").appendChild(dd);sd();
-  let dup=0,neu=0;const tables=[];
-  for(const f of files){const fd=new FormData();fd.append("file",f);if(STATE.convId)fd.append("conversation_id",STATE.convId);
-   try{const up=await fetch("/api/documents",{method:"POST",credentials:"include",body:fd});const uj=await up.json().catch(()=>null);if(uj){dup+=uj.duplicates||0;neu+=uj.saved||0;(uj.results||[]).forEach(rr=>{if(rr&&rr.extraction&&rr.extraction.markers&&rr.extraction.markers.length)tables.push(rr.extraction)})}}catch{}}
-  unDelib();STATE.files=[];renderFiles();
-  tables.forEach(ex=>tableBubble(ex.markers,ex.lab_name||"نتائج التحليل المستخرجة"));
-  if(dup){const n=document.createElement("div");n.className="upnote";n.innerHTML=`<svg class="ico"><use href="#i-shieldcheck"/></svg> ${dup} ملف موجود مسبقاً — استخدمت بياناته بدون تكرار${neu?` · أضفت ${neu} ملف جديد`:""}.`;document.getElementById("cscroll").appendChild(n);sd();}}
+ if(files.length){const sc=document.getElementById("cscroll");
+  const res=await uploadHealthFiles(files,STATE.convId,sc);
+  STATE.files=[];renderFiles();
+  res.extractions.forEach(ex=>tableBubble(ex.markers,ex.lab_name||"نتائج التحليل المستخرجة"));
+  if(res.dup){const n=document.createElement("div");n.className="upnote";n.innerHTML=`<svg class="ico"><use href="#i-shieldcheck"/></svg> ${res.dup} ملف موجود مسبقاً — استخدمت بياناته بدون تكرار${res.saved?` · أضفت ${res.saved} ملف جديد`:""}.`;sc.appendChild(n);sd();}
+  if(res.pendingIds.length){toast("جارٍ قراءة "+res.pendingIds.length+" ملف في الخلفية — سنخبرك عند اكتمال الاستخراج");pollDocuments(res.pendingIds)}}
  if(analyze)delib();else typing();
- const r=await api("/api/chat",{method:"POST",body:JSON.stringify({question:q||"حلّل نتائج التحاليل التي رفعتها واشرح كل مؤشر (طبيعي/مرتفع/منخفض) وما المطلوب مني.",conversation_id:STATE.convId,analyze})});
+ STATE.lastQ=q||"حلّل نتائج التحاليل التي رفعتها واشرح كل مؤشر (طبيعي/مرتفع/منخفض) وما المطلوب مني.";
+ const r=await api("/api/chat",{method:"POST",body:JSON.stringify({question:STATE.lastQ,conversation_id:STATE.convId,analyze})});
  unDelib();STATE.busy=false;document.getElementById("csend").disabled=false;
- if(r.ok&&r.data){STATE.convId=r.data.conversation_id||STATE.convId;bubble("ai",r.data.answer||"تعذّر توليد إجابة.",r.data);loadCouncil();}
+ if(r.ok&&r.data){try{localStorage.setItem("entix_asked","1")}catch(e){}
+  STATE.convId=r.data.conversation_id||STATE.convId;bubble("ai",r.data.answer||"تعذّر توليد إجابة.",r.data);
+  if(r.data.n8n&&r.data.n8n.fallback_used&&r.data.n8n.council_failed){const sc=document.getElementById("cscroll");const n=document.createElement("div");n.className="upnote";n.style.background="#fff7ed";n.style.borderColor="#fed7aa";n.style.color="#9a3412";n.innerHTML='رد مبدئي محدود — تعذّر وصول المجلس الكامل مؤقتاً <button class="retryb" onclick="retryLast()">أعد المحاولة</button>';sc.appendChild(n);sd();}
+  loadCouncil();}
  else bubble("ai","صار خطأ في الاتصال. حاول مرة ثانية.",null)}
+function retryLast(){if(!STATE.lastQ||STATE.busy)return;const t=document.getElementById("cta");t.value=STATE.lastQ;grow();sendMsg()}
 
 /* drag-drop */
 window.addEventListener("DOMContentLoaded",()=>{const box=document.getElementById("cbox");if(box){["dragover","dragenter"].forEach(e=>box.addEventListener(e,ev=>{ev.preventDefault();box.classList.add("drag")}));["dragleave","drop"].forEach(e=>box.addEventListener(e,ev=>{ev.preventDefault();box.classList.remove("drag")}));box.addEventListener("drop",ev=>{if(ev.dataTransfer.files.length)addFiles(ev.dataTransfer.files)})}});
@@ -554,7 +683,7 @@ function scoreFrom(sigs){var meas=sigs.filter(function(s){return s.flag||s.statu
 function gaugeSVG(score){if(score==null)return"";var c=2*Math.PI*52;var off=c*(1-score/100);return '<svg viewBox="0 0 120 120" width="118" height="118"><circle cx="60" cy="60" r="52" fill="none" stroke="#1e293b" stroke-width="11"/><circle cx="60" cy="60" r="52" fill="none" stroke="#2563eb" stroke-width="11" stroke-linecap="round" stroke-dasharray="'+c.toFixed(1)+'" stroke-dashoffset="'+off.toFixed(1)+'" transform="rotate(-90 60 60)"/><text x="60" y="56" text-anchor="middle" class="g-n">'+score+'</text><text x="60" y="74" text-anchor="middle" class="g-u">من 100</text></svg>';}
 function printReport(){window.print();}
 async function resetMyData(){if(!confirm("سيتم حذف كل التحاليل والمؤشرات المرفوعة لتبدأ من جديد نظيف. هل تريد المتابعة؟"))return;var r=await api("/api/health-data/reset",{method:"POST"});if(r&&r.ok){alert("تم تصفير بياناتك بنجاح. ارفع تحاليلك من جديد.");loadReports()}else{alert("تعذّر التصفير — تأكد أنك مسجّل بحساب المشرف (بريدك).")}}
-async function loadReports(){const v=document.getElementById("reports");v.innerHTML='<div class="empty">جارٍ التحميل…</div>';
+async function loadReports(){const v=document.getElementById("reports");v.innerHTML=skeleton(3);
  const r=await api("/api/dashboard");const d=(r.data)||{};
  const sigs=(d.health_signals||[]).map(function(s){return {label:s.label,num:s.latest_numeric,val:(s.latest_numeric!=null?s.latest_numeric:s.latest_value),unit:s.unit,range:s.reference_range,flag:s.status,slabel:s.status_label,exp:s.summary,exl:s.interpretation};});
  const meas=sigs.filter(function(s){return s.num!=null||(s.val!=null&&String(s.val).trim())});
@@ -570,7 +699,14 @@ async function loadReports(){const v=document.getElementById("reports");v.innerH
   '<div class="divider"></div><div id="printable">'+repCore+'</div>'+
   '<div class="labt-h2" style="margin-top:24px"><h3 class="labt-t2">أرشيف الملفات</h3></div>'+
   (docs.length?docs.slice(0,40).map(function(x){return '<div class="row"><span class="pill p-good">'+esc((x.document_type||x.report_kind||"FILE").toUpperCase().slice(0,8))+'</span><div><b>'+esc(x.title||"تقرير")+'</b><div style="color:var(--muted);font-size:13px;margin-top:4px">'+esc((x.summary||"").slice(0,140))+'</div></div></div>'}).join(""):'<div class="empty">ما فيه ملفات بعد.</div>');}
-async function upReport(files){const v=document.getElementById("reports");const n=document.createElement("div");n.className="empty";n.textContent="جارٍ الرفع والاستخراج…";v.prepend(n);for(const f of files){const fd=new FormData();fd.append("file",f);try{await fetch("/api/documents",{method:"POST",credentials:"include",body:fd})}catch{}}setTimeout(loadReports,1400)}
+async function upReport(files){const v=document.getElementById("reports");const host=document.createElement("div");v.prepend(host);
+ const res=await uploadHealthFiles(Array.from(files),null,host);host.remove();
+ const n=res.extractions.reduce(function(a,e){return a+e.markers.length},0);
+ if(n)toast("تم استخراج "+n+" مؤشر — تحدّث تقريرك","ok");
+ else if(res.saved||res.dup)toast("تم الرفع — جارٍ قراءة الملف في الخلفية…");
+ else toast("لم يُرفع أي ملف","err");
+ if(res.pendingIds.length)pollDocuments(res.pendingIds);
+ loadReports()}
 
 /* PROTOCOL */
 function pSlot(t){t=(t||"").toLowerCase();if(/مساء|ليل|bed|evening|night|عشاء|نوم/.test(t))return"eve";if(/ظهر|ظهير|noon|afternoon|غداء|lunch/.test(t))return"noon";return"morn";}
@@ -583,7 +719,7 @@ function setProtoView(v){STATE.protoView=v;loadProtocol();}
 function arName(en){var n=String(en||"").toLowerCase();var D=[[/wellbutrin|bupropion/,"بوبروبيون"],[/levothyroxine|thyroxine|eltroxin/,"ليفوثيروكسين — هرمون الغدة"],[/omega|fish oil|epa|dha/,"أوميغا-3"],[/vitamin d|vit d|cholecalciferol/,"فيتامين د"],[/vitamin c|ascorbic/,"فيتامين سي"],[/iron|ferrochel|bisglycinate/,"الحديد المخلّب"],[/tadalafil|snafi|cialis/,"تادالافيل"],[/magnesium|threonate|neuro-mag/,"مغنيسيوم ل-ثريونات"],[/zinc/,"الزنك"],[/b12|cobalamin/,"فيتامين ب12"],[/folate|folic/,"حمض الفوليك"],[/melatonin/,"ميلاتونين"],[/coq10|ubiquinol|coenzyme/,"إنزيم Q10"],[/vitamin b|complex/,"مجموعة فيتامين ب"],[/probiotic/,"بروبيوتيك"],[/ashwagandha/,"أشواغاندا"]];for(var i=0;i<D.length;i++){if(D[i][0].test(n))return D[i][1]}return""}
 function brandOf(name){var m=String(name||"").match(/\(([^)]+)\)/);return m?m[1].trim():""}
 function baseName(name){return String(name||"").replace(/\s*\([^)]*\)\s*/g,"").trim()}
-async function loadProtocol(){const v=document.getElementById("protocol");v.innerHTML='<div class="empty">جارٍ التحميل…</div>';
+async function loadProtocol(){const v=document.getElementById("protocol");v.innerHTML=skeleton(3);
  const r=await api("/api/protocol");const p=(r.data&&(r.data.protocol_snapshot||r.data))||{};
  const meds=(p.medications||[]).map(function(m){return {name:m.name,dose:m.dose,frequency:m.frequency,timing:m.timing,notes:m.notes,reason:m.reason,cat:"علاج نشط",catCls:"med",kind:"med"}});
  const supps=(p.supplements||[]).map(function(m){return {name:m.name,dose:m.dose,frequency:m.frequency,timing:m.timing,notes:m.notes,reason:m.reason,cat:"مكمل يومي",catCls:"supp",kind:"supp"}});

@@ -149,6 +149,19 @@ async function callGemini(model: string, system: string, user: string, timeoutMs
 }
 
 // Generalised web search — receives NO patient data, only a neutral medical query.
+// Strip potential PHI before any third-party call: emails, phones, IDs, dates,
+// and measured values/numbers. Only the medical terms of the question survive.
+function sanitizeSearchQuery(message: string): string {
+  return message
+    .replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, " ")
+    .replace(/\+?\d[\d\s().-]{6,}\d/g, " ")
+    .replace(/\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/g, " ")
+    .replace(/\d+(?:[.,]\d+)?/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 220);
+}
+
 async function webSearch(query: string, timeoutMs: number): Promise<Array<{ title: string; url: string; snippet: string }>> {
   if (!config.SERPER_API_KEY) return [];
   try {
@@ -175,7 +188,7 @@ async function webSearch(query: string, timeoutMs: number): Promise<Array<{ titl
 // Council orchestration
 // ---------------------------------------------------------------------------
 
-function memorySummary(memoryContext: any): string {
+export function memorySummary(memoryContext: any): string {
   if (!memoryContext) return "لا يوجد سياق طبي محفوظ بعد.";
   try {
     const stats = memoryContext.stats || {};
@@ -258,7 +271,8 @@ export async function runCouncil(input: CouncilInput): Promise<CouncilResult> {
   // 2) Researcher — neutral web evidence (no PHI) + Gemini synthesis.
   let research = "";
   if (config.COUNCIL_WEB_RESEARCH === "true") {
-    const hits = await webSearch(`${input.userMessage} evidence guideline`, Math.min(8000, timeoutMs));
+    const safeQuery = sanitizeSearchQuery(input.userMessage);
+    const hits = safeQuery ? await webSearch(`${safeQuery} evidence guideline`, Math.min(8000, timeoutMs)) : [];
     for (const h of hits.slice(0, 5)) sources.push({ title: h.title, url: h.url });
     const snippetBlock = hits.map((h, i) => `[${i + 1}] ${h.title} — ${h.snippet} (${h.url})`).join("\n");
     try {

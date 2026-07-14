@@ -16,6 +16,7 @@ import { z } from "zod";
 import { checkDb, getDbIdentity, getPersonBySlug, pool, withPerson } from "./db.js";
 import { adminEmails, config, googleOAuthEnabled, googleRedirectUri, providerStatus } from "./config.js";
 import { runCouncil, runDirect, councilEnabled, visionExtractLabs, type LabExtraction } from "./council.js";
+import { runGoogleAgent, googleAgentEnabled } from "./google-agent.js";
 import { runMigrations } from "./migrate.js";
 import {
   clearGoogleState,
@@ -716,7 +717,7 @@ async function extractLabsWithVision(filePath: string, ext: string, mimetype?: s
     const images = await renderToImages(filePath, ext, mimetype);
     if (!images.length) return null;
     const result = await visionExtractLabs(images, { model: config.EXTRACTION_MODEL });
-    return result.markers.length ? result : result;
+    return result.markers.length ? result : null;
   } catch (error) {
     app.log.warn({ err: error }, "vision_extract_failed");
     return null;
@@ -1792,7 +1793,7 @@ async function handleEmailPasswordLogin(request: FastifyRequest, reply: FastifyR
 }
 
 app.post("/api/login", { config: { rateLimit: { max: 8, timeWindow: "1 minute" } } }, handleEmailPasswordLogin);
-app.post("/api/email-login", handleEmailPasswordLogin);
+app.post("/api/email-login", { config: { rateLimit: { max: 8, timeWindow: "1 minute" } } }, handleEmailPasswordLogin);
 
 app.post("/api/signup", { config: { rateLimit: { max: 5, timeWindow: "1 minute" } } }, async (request, reply) => {
   const body = z.object({ email: z.string().email(), password: z.string().min(8) }).parse(request.body);
@@ -2186,6 +2187,37 @@ app.get("/api/documents/:id/file", { preHandler: requireSession }, async (reques
   });
 });
 
+app.get("/api/documents/:id/status", { preHandler: requireSession }, async (request, reply) => {
+  const session = currentSession(request);
+  const params = z.object({ id: z.string().uuid() }).parse(request.params);
+  return withPerson(session?.slug || config.HMDB_DEFAULT_PERSON_SLUG, async (client, person) => {
+    const result = await client.query(
+      `select d.id,
+              d.title,
+              d.metadata->'ocr' as ocr,
+              coalesce((select count(*)::int
+                        from lab_markers m
+                        join lab_panels p on p.id = m.lab_panel_id
+                        where p.person_id = d.person_id and p.source_document_id = d.id), 0) as markers_extracted
+       from documents d
+       where d.id = $1 and d.person_id = $2
+       limit 1`,
+      [params.id, person.id]
+    );
+    const document = result.rows[0];
+    if (!document) return reply.code(404).send({ error: "document_not_found" });
+    const ocrStatus = String(document.ocr?.status || "not_required");
+    return {
+      ok: true,
+      id: document.id,
+      title: document.title,
+      ocr_status: ocrStatus,
+      markers_extracted: document.markers_extracted,
+      done: ["completed", "failed", "not_required"].includes(ocrStatus)
+    };
+  });
+});
+
 app.get("/api/conversations", { preHandler: requireSession }, async (request) => {
   const session = currentSession(request);
   return withPerson(session?.slug || config.HMDB_DEFAULT_PERSON_SLUG, async (client, person) => {
@@ -2515,6 +2547,16 @@ async function runHealthCommittee(request: any, userMessage: string, requestedSe
   const personSlug = session?.slug || config.HMDB_DEFAULT_PERSON_SLUG;
   const conversation = await ensureChatSession(personSlug, requestedSessionId, userMessage, session?.email);
   const sessionId = conversation.id;
+  // Auto-title: replace placeholder titles with the first real user message.
+  if (["محادثة صحية جديدة", "رفع ملفات صحية", "محادثة"].includes(String(conversation.title || "").trim())) {
+    const autoTitle = chatTitleFromMessage(userMessage);
+    if (autoTitle && autoTitle !== conversation.title) {
+      conversation.title = autoTitle;
+      await withPerson(personSlug, (client, person) =>
+        client.query(`update chat_sessions set title = $3, updated_at = now() where id = $1 and person_id = $2`, [sessionId, person.id, autoTitle])
+      ).catch(() => undefined);
+    }
+  }
   await saveChatMessage(personSlug, sessionId, "user", userMessage, {
     source: "clinical-clarity-ui",
     email: session?.email || null
@@ -2556,6 +2598,7 @@ async function runHealthCommittee(request: any, userMessage: string, requestedSe
 
   // In-API doctor council (preferred). Reuses the deterministic validator's
   // PHI-aware red-line hits as safety input, then runs the multi-model network.
+  let councilFallbackReason: string | null = null;
   if (councilEnabled()) {
     const redLineHits = deterministicCommittee(personSlug, sessionId, userMessage, healthSnapshot).validator_status.hits;
     const pastMemory = await withPerson(personSlug, async (client, person) => {
@@ -2588,7 +2631,8 @@ async function runHealthCommittee(request: any, userMessage: string, requestedSe
       redLineHits,
       pastMemory
     }).catch((error: unknown) => {
-      request.log.warn({ err: error }, "council_unavailable");
+      councilFallbackReason = error instanceof Error ? `council_error: ${error.message.slice(0, 160)}` : "council_error";
+      request.log.error({ err: error }, "council_unavailable");
       return null;
     });
     if (council && council.ok) {
@@ -2623,6 +2667,8 @@ async function runHealthCommittee(request: any, userMessage: string, requestedSe
         ...meta
       };
     }
+    if (!councilFallbackReason) councilFallbackReason = council ? "council_not_ok" : "council_error";
+    request.log.error({ reason: councilFallbackReason, council_ok: council?.ok ?? null }, "council_failed_falling_back");
   }
 
   if (!config.N8N_HEALTH_COMMITTEE_WEBHOOK) {
@@ -2636,7 +2682,8 @@ async function runHealthCommittee(request: any, userMessage: string, requestedSe
       configured: false,
       ok: false,
       fallback_used: true,
-      fallback_reason: "missing_N8N_HEALTH_COMMITTEE_WEBHOOK",
+      fallback_reason: councilFallbackReason || "missing_N8N_HEALTH_COMMITTEE_WEBHOOK",
+      council_failed: Boolean(councilFallbackReason),
       n8n_status: n8nIntegrationSnapshot()
     };
     await saveCommitteeResult(personSlug, sessionId, fallback);
@@ -2804,6 +2851,44 @@ app.post("/api/health/chat", { preHandler: requireSession }, async (request, rep
     })
     .parse(request.body);
   return reply.send(await runHealthCommittee(request, body.user_message, body.conversation_id || body.session_id));
+});
+
+// Google-only agent: Gemini + native Google Search grounding, keyed to the
+// dedicated entix-health GCP project when GOOGLE_AGENT_GEMINI_KEY is set.
+app.post("/api/google-agent/chat", { preHandler: requireSession }, async (request, reply) => {
+  const body = z
+    .object({
+      question: z.string().trim().min(1).max(4000),
+      conversation_id: z.string().uuid().nullable().optional()
+    })
+    .parse(request.body);
+  if (!googleAgentEnabled()) return reply.code(503).send({ ok: false, error: "google_agent_not_configured" });
+  const session = currentSession(request);
+  const personSlug = session?.slug || config.HMDB_DEFAULT_PERSON_SLUG;
+  const conversation = await ensureChatSession(personSlug, body.conversation_id || undefined, body.question, session?.email);
+  await saveChatMessage(personSlug, conversation.id, "user", body.question, { source: "google-agent-ui", email: session?.email || null });
+  const healthSnapshot = await buildHealthSnapshot(personSlug).catch(() => null);
+  try {
+    const result = await runGoogleAgent({
+      personSlug,
+      sessionId: conversation.id,
+      userMessage: body.question,
+      memoryContext: healthSnapshot
+    });
+    const meta = {
+      request_id: result.request_id,
+      engine: "google-agent",
+      model: result.model,
+      project: result.project,
+      sources: result.sources,
+      grounded: result.grounded
+    };
+    await saveChatMessage(personSlug, conversation.id, "assistant", result.answer, meta);
+    return reply.send({ ok: true, answer: result.answer, conversation_id: conversation.id, conversation, ...meta });
+  } catch (error) {
+    request.log.error({ err: error }, "google_agent_failed");
+    return reply.code(502).send({ ok: false, error: "google_agent_failed", conversation_id: conversation.id });
+  }
 });
 
 app.post("/api/documents", { preHandler: requireSession }, async (request, reply) => {
@@ -3293,13 +3378,14 @@ app.get("/v1/persons/:slug/search", { preHandler: requireHmdbSecret }, async (re
 app.addHook("onResponse", async (request, reply) => {
   if (request.url.startsWith("/healthz")) return;
   const endpoint = request.url.split("?")[0] || request.url;
+  const auditSlug = currentSession(request)?.slug || config.HMDB_DEFAULT_PERSON_SLUG;
   pool
     .query(
       `insert into health_memory.api_audit_log (request_id, person_slug, endpoint, method, status_code, ip_address, user_agent, duration_ms, metadata)
        values ($1, $2, $3, $4, $5, nullif($6, '')::inet, $7, $8, $9)`,
       [
         request.id,
-        config.HMDB_DEFAULT_PERSON_SLUG,
+        auditSlug,
         endpoint,
         request.method,
         reply.statusCode,
