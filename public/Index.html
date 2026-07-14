@@ -971,8 +971,8 @@ function brandOf(name){var m=String(name||"").match(/\(([^)]+)\)/);return m?m[1]
 function baseName(name){return String(name||"").replace(/\s*\([^)]*\)\s*/g,"").trim()}
 async function loadProtocol(){const v=document.getElementById("protocol");v.innerHTML=skeleton(3);
  const r=await api("/api/protocol");const p=(r.data&&(r.data.protocol_snapshot||r.data))||{};
- const meds=(p.medications||[]).map(function(m){return {name:m.name,dose:m.dose,frequency:m.frequency,timing:m.timing,notes:m.notes,reason:m.reason,cat:"علاج نشط",catCls:"med",kind:"med"}});
- const supps=(p.supplements||[]).map(function(m){return {name:m.name,dose:m.dose,frequency:m.frequency,timing:m.timing,notes:m.notes,reason:m.reason,cat:"مكمل يومي",catCls:"supp",kind:"supp"}});
+ const meds=(p.medications||[]).map(function(m){return {name:m.name,dose:m.dose,frequency:m.frequency,timing:m.timing,notes:m.notes,reason:m.reason,name_ar:m.name_ar,brand:m.brand,why_formulation:m.why_formulation,cat:"علاج نشط",catCls:"med",kind:"med"}});
+ const supps=(p.supplements||[]).map(function(m){return {name:m.name,dose:m.dose,frequency:m.frequency,timing:m.timing,notes:m.notes,reason:m.reason,name_ar:m.name_ar,brand:m.brand,why_formulation:m.why_formulation,cat:"مكمل يومي",catCls:"supp",kind:"supp"}});
  const items=meds.concat(supps).map(function(m,i){var why=m.notes||m.reason||"";return {name:m.name||"-",dose:m.dose||"",freq:m.frequency||"",timing:m.timing||"",why:why,name_ar:(m.name_ar||""),brand:(m.brand||""),why_formulation:(m.why_formulation||""),cat:m.cat,catCls:m.catCls,slot:pSlot(m.timing||m.frequency),alert:pAlertTxt(m),id:(m.kind+"-"+(m.name||i)).replace(/\s+/g,"_")};});
  const inter=p.interactions||[],reds=p.red_lines||[];
  const view=STATE.protoView||"today";
