@@ -4,6 +4,8 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
 <title>Entix Health · Vita</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230a0f1e'/%3E%3Cpath d='M20 14v36M20 32h24M44 14v36' stroke='%2338bdf8' stroke-width='5' stroke-linecap='round' fill='none'/%3E%3C/svg%3E"/>
+<meta name="theme-color" content="#0a0f1e"/>
 <meta name="description" content="Vita — مساحتك الصحية الخاصة · مجلس الأطباء الذكي"/>
 <style>
 :root{
@@ -525,7 +527,7 @@ function killSplash(){var s=document.getElementById("splash");if(s)s.remove()}
 function showLanding(){killSplash();document.getElementById("landing").classList.remove("hidden");document.getElementById("auth").classList.add("hidden");document.getElementById("app").classList.add("hidden")}
 function showAuth(m){killSplash();if(m)setMode(m);document.getElementById("landing").classList.add("hidden");document.getElementById("auth").classList.remove("hidden");document.getElementById("app").classList.add("hidden")}
 function show(li){killSplash();document.getElementById("landing").classList.add("hidden");document.getElementById("auth").classList.toggle("hidden",li);document.getElementById("app").classList.toggle("hidden",!li)}
-function go(id,el){location.hash="#"+id;document.querySelectorAll(".screen").forEach(s=>s.classList.remove("on"));document.getElementById(id).classList.add("on");document.querySelectorAll(".rail .ic").forEach(b=>b.classList.toggle("on",b.dataset.s===id));if(id==="dash")loadDash();if(id==="council")loadCouncil();if(id==="reports")loadReports();if(id==="protocol")loadProtocol();}
+function go(id,el){location.hash="#"+id;document.querySelectorAll(".screen").forEach(s=>s.classList.remove("on"));document.getElementById(id).classList.add("on");document.querySelectorAll(".rail .ic").forEach(b=>b.classList.toggle("on",b.dataset.s===id));if(id===STATE._cur)return;STATE._cur=id;if(id==="dash")loadDash();if(id==="council")loadCouncil();if(id==="reports")loadReports();if(id==="protocol")loadProtocol();}
 function route(){const h=(location.hash||"#dash").replace("#","");go(["dash","council","protocol","reports"].includes(h)?h:"dash")}
 
 /* DASHBOARD */
@@ -691,7 +693,15 @@ async function loadReports(){const v=document.getElementById("reports");v.innerH
  const meas=sigs.filter(function(s){return s.num!=null||(s.val!=null&&String(s.val).trim())});
  const sc=scoreFrom(sigs);
  const docs=(d.documents||[]).concat(d.reports||[]);
- const plan=(d.medications||[]).concat(d.supplements||[]).slice(0,6);
+ // De-duplicate meds+supps by name — DB may hold repeated rows from multiple
+ // ingests. Prefer the protocol_snapshot (already deduped server-side); fall
+ // back to deduping the raw arrays locally.
+ var _snap=d.protocol_snapshot||{};
+ function dedupeByName(arr){var seen={},out=[];for(var i=0;i<arr.length;i++){var n=(arr[i].name||"").trim().toLowerCase();if(!n||seen[n])continue;seen[n]=1;out.push(arr[i]);}return out;}
+ var rawMeds=dedupeByName(d.medications||[]);
+ var rawSupps=dedupeByName(d.supplements||[]);
+ var plan=(rawMeds.concat(rawSupps)).slice(0,6);
+ var planMeds=(_snap.medications&&_snap.medications.length)?_snap.medications:rawMeds;
  const repCore=meas.length?('<div class="rep-score"><div class="rep-gauge">'+gaugeSVG(sc.score)+'</div><div style="flex:1;min-width:230px"><div style="display:flex;align-items:center;gap:10px"><h2 class="rep-h2">حالتك الصحية</h2>'+(sc.score!=null?'<span class="rep-grade">'+sc.grade+'</span>':"")+'</div><div class="rep-stats"><div class="rep-stat"><div class="n">'+sc.tot+'</div><div class="l">مؤشرات</div></div><div class="rep-stat"><div class="n" style="color:#fbbf24">'+sc.watch+'</div><div class="l">تستدعي انتباه</div></div><div class="rep-stat"><div class="n" style="color:#f87171">'+sc.alert+'</div><div class="l">حرجة</div></div><div class="rep-stat"><div class="n" style="color:#34d399">'+sc.norm+'</div><div class="l">ضمن المعدل</div></div></div></div></div>'+
    '<div class="labt" style="margin-top:18px"><div class="labt-h2"><h3 class="labt-t2">سجل المؤشرات — مشروح</h3><p class="labt-sub2">كل مؤشر بقيمته وموقعه من المعدل وشرح تأثيره.</p></div>'+modernTable(meas.map(function(s){return {ar:s.label,en:"",val:s.val,num:s.num,unit:s.unit,range:s.range,flag:s.flag,slabel:s.slabel,explain:s.exp,exl:s.exl}}))+'</div>'+
    (plan.length?'<div class="bigcard" style="margin-top:18px"><div class="kicker"><svg class="ico"><use href="#i-pill"/></svg> الخطة العلاجية الحالية</div><div class="rxlist">'+plan.map(function(m){return '<div class="rxcard rx-good"><div class="rxtop"><b class="rxname">'+esc(m.name||"-")+'</b>'+(m.dose?'<span class="rxdose">'+esc(m.dose)+'</span>':"")+(m.timing?'<span class="rxtime">'+esc(m.timing)+'</span>':"")+'</div>'+((m.reason||m.notes)?'<p class="rxwhy"><span class="rxwhy-l">السبب</span> '+esc(m.reason||m.notes)+'</p>':"")+'</div>'}).join("")+'</div></div>':"")+
