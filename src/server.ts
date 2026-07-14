@@ -1342,6 +1342,35 @@ function buildRiskAlerts(signals: HealthSignal[], redLines: any[], pendingOcr: n
 
 function buildProtocolSnapshot(medications: any[], supplements: any[], conditions: any[], redLines: any[]): ProtocolSnapshot {
   const medLine = (item: any) => [item.name, item.dose, item.frequency, item.timing].filter(Boolean).join(" · ");
+  // Bilingual enrichment dictionary — maps a medication/supplement name (or
+  // fragment) to its Arabic label, preferred brand, and a short bilingual note
+  // explaining *why this specific formulation*. Built from the patient's real
+  // tailored protocol reference. Unknown items fall through untouched.
+  type EnrichEntry = { ar?: string; brand?: string; why_formulation?: string };
+  const ENRICH: Array<{ match: RegExp; data: EnrichEntry }> = [
+    { match: /levothyroxine|ثيروكسين|الغدة/i, data: { ar: "ليفوثيروكسين (هرمون الغدة)", brand: "Euthyrox / Eltroxin", why_formulation: "صيغة T4 اصطناعية تُعوّض نقص هرمون الغدة الدرقية. تُؤخذ على معدة فارغة مع الماء فقط، مع انتظار 45-60 دقيقة قبل الطعام أو القهوة، ومباعدة 4-6 ساعات عن الكالسيوم/الحديد/المغنيسيوم." } },
+    { match: /wellbutrin|bupropion/i, data: { ar: "ويلبيوترين XL (بوبروبيون)", brand: "Wellbutrin XL", why_formulation: "مضاد اكتئاب من فئة NDRI، يدعم التركيز ويُستخدم off-label لدعم حالة ADHD. امتدادي الإطلاق (XL) للحفاظ على مستوى ثابت طوال اليوم. راقب عتبة النوبة وتجنّب تكديس المنبهات." } },
+    { match: /tadalafil|snafi|سنافي/i, data: { ar: "تادالافيل (سنافي)", brand: "Snafi / Cialis", why_formulation: "جرعة استعادية يومية (Daily Restorative Dose) لدعم صحة البطانة الوعائية (Endothelial support). مُقفلة عند 5mg — لا تصعيد دون موافقة طبيب المسالك." } },
+    { match: /iron|ferrochel|حديد|بسكينيات/i, data: { ar: "حديد بيسجلايسينات (فيرّوشيل)", brand: "California Gold Nutrition · Ferrochel®", why_formulation: "صيغة بيسجلايسينات من شركة Albion (Ferrochel®) — امتصاص عالٍ مع معدل أعراض جانبية معوية أقل من أملاح الحديد التقليدية. يُؤخذ مع فيتامين C، ومبعد عن Levothyroxine والكالسيوم بنحو 4-6 ساعات." } },
+    { match: /vitamin d3|vitamin d|فيتامين د/i, data: { ar: "فيتامين D3 (قطرات)", brand: "Life Extension · Liquid D3 in MCT Oil", why_formulation: "قطرات سائلة في زيت MCT لامتصاص أسرع وأعلى (فيتامين D دهني الذوبان). يُؤخذ مع وجبة الإفطار. يدعم المزاج والمناعة وكثافة العظام." } },
+    { match: /omega|fish oil|أوميجا/i, data: { ar: "أوميجا-3 (زيت سمك ثلاثي القوة)", brand: "Sports Research · Alaskan Omega-3", why_formulation: "مكوّن ثلاثي القوة حاصل على شهادة IFOS 5-Star لنقاء الزئبق. نسبة EPA عالية (680mg) — مهمة للدعم العصبي وADHD وتحسين HDL/Triglycerides." } },
+    { match: /magnesium|threonate|مغنيسيوم/i, data: { ar: "مغنيسيوم L-ثريونات (نيورو-ماج)", brand: "Life Extension · Neuro-Mag® (Magtein®)", why_formulation: "صيغة L-Threonate المغلفة برخصة Magtein® — الوحيدة التي تعبر حاجز الدم-الدماغ (Blood-Brain Barrier)، فتدعم الذاكرة والتركيز والاسترخاء العصبي، عكس أملاح المغنيسيوم التقليدية ذات التأثير المُرخي للعضلات فقط." } },
+    { match: /vitamin c|فيتامين سي|فيتامين ج/i, data: { ar: "فيتامين C", brand: "—", why_formulation: "يُؤخذ مع الحديد لرفع نسبة امتصاصه (يعزز تحويل الحديد إلى الشكل القابل للامتصاص)." } }
+  ];
+  const enrichItem = (item: any) => {
+    const haystack = `${item.name || ""} ${item.notes || ""} ${item.reason || ""} ${item.timing || ""}`;
+    for (const entry of ENRICH) {
+      if (entry.match.test(haystack)) {
+        return {
+          ...item,
+          name_ar: item.name_ar || entry.data.ar,
+          brand: item.brand || entry.data.brand,
+          why_formulation: item.why_formulation || entry.data.why_formulation
+        };
+      }
+    }
+    return item;
+  };
   // De-duplicate by medication/supplement name (DB may hold repeated rows from
   // multiple ingests). Keep the newest (rows arrive ordered by created_at desc).
   const dedupeByName = (arr: any[]) => {
@@ -1355,14 +1384,8 @@ function buildProtocolSnapshot(medications: any[], supplements: any[], condition
     }
     return out;
   };
-  const activeMedications = dedupeByName(medications).map((item) => ({
-    ...item,
-    display: medLine(item)
-  }));
-  const activeSupplements = dedupeByName(supplements).map((item) => ({
-    ...item,
-    display: medLine(item)
-  }));
+  const activeMedications = dedupeByName(medications).map((item) => enrichItem({ ...item, display: medLine(item) }));
+  const activeSupplements = dedupeByName(supplements).map((item) => enrichItem({ ...item, display: medLine(item) }));
   const findItems = (pattern: RegExp) =>
     Array.from(
       new Set(
