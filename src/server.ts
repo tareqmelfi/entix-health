@@ -1371,14 +1371,19 @@ function buildProtocolSnapshot(medications: any[], supplements: any[], condition
     }
     return item;
   };
-  // De-duplicate by medication/supplement name (DB may hold repeated rows from
-  // multiple ingests). Keep the newest (rows arrive ordered by created_at desc).
+  // De-duplicate medication/supplement rows that arrive repeated from multiple
+  // ingests. Key on name+dose+frequency+timing so two genuinely different
+  // prescriptions of the same drug (e.g. a morning and an evening dose, or two
+  // formulations of the same supplement) are preserved, while exact duplicates
+  // collapse. Rows arrive ordered by created_at desc, so the newest wins.
   const dedupeByName = (arr: any[]) => {
     const seen = new Set<string>();
     const out: any[] = [];
     for (const item of arr) {
-      const key = String(item?.name || "").toLowerCase().replace(/\s+/g, " ").trim();
-      if (!key || seen.has(key)) continue;
+      const key = [item?.name, item?.dose, item?.frequency, item?.timing]
+        .map((v) => String(v || "").toLowerCase().replace(/\s+/g, " ").trim())
+        .join("|");
+      if (!key || key === "|||" || seen.has(key)) continue;
       seen.add(key);
       out.push(item);
     }
@@ -1823,7 +1828,10 @@ async function sharedLoginLimit(request: any, reply: any) {
   if (loginAttempts.size > 5000) {
     for (const [k, v] of loginAttempts) if (now >= v.resetAt) loginAttempts.delete(k);
   }
-  const key = request.ip || "unknown";
+  // Use requestIp() (honors x-forwarded-for) so the limiter keys on the real
+  // client behind the CDN/reverse-proxy instead of the proxy's single IP —
+  // otherwise one user's failed attempts could lock out everyone.
+  const key = requestIp(request) || "unknown";
   const slot = loginAttempts.get(key);
   if (!slot || now >= slot.resetAt) {
     loginAttempts.set(key, { count: 1, resetAt: now + 60_000 });
@@ -1840,6 +1848,12 @@ app.post("/api/signup", { config: { rateLimit: { max: 5, timeWindow: "1 minute" 
   const body = z.object({ email: z.string().email(), password: z.string().min(8) }).parse(request.body);
   const result = await upsertActiveEmailUser(body.email, body.password);
   if (result.suspended) return reply.code(403).send({ error: "account_suspended" });
+  // Reject signup for an already-active account. Previously this fell through
+  // and called setSession() — meaning anyone who knew an existing email could
+  // sign in with ANY password (no password check on the alreadyActive path),
+  // which is a full authentication bypass. Signup must only create new accounts;
+  // existing users must authenticate via /api/login.
+  if (result.alreadyActive) return reply.code(409).send({ error: "account_already_exists" });
   await touchUserLogin(result.user.email);
   setSession(reply, { slug: result.user.person_slug || "tareq", email: result.user.email, role: result.user.role, status: "active" });
   return { ok: true, status: "active", email: normalizeEmail(body.email), user: redactUserRow(result.user) };

@@ -62,6 +62,11 @@ export function verifySessionCookie(token?: string) {
   try {
     const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as SessionPayload;
     if (!parsed.slug || !parsed.email || parsed.status !== "active") return null;
+    // Enforce server-side session expiry — the browser cookie maxAge alone is
+    // not enough if the token is exfiltrated (XSS / log leak). iat is set in
+    // makeSessionCookie as Date.now() (ms). Reject anything older than 7 days.
+    const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+    if (!parsed.iat || Date.now() - parsed.iat > SESSION_MAX_AGE_MS) return null;
     return parsed;
   } catch {
     return null;
@@ -110,7 +115,9 @@ export function clearGoogleState(reply: FastifyReply) {
 export async function requireHmdbSecret(request: FastifyRequest, reply: FastifyReply) {
   const supplied = request.headers["x-hmdb-secret"];
   const token = Array.isArray(supplied) ? supplied[0] : supplied;
-  if (!token || token !== config.HMDB_API_SECRET) {
+  // Use a constant-time comparison to avoid timing attacks that could leak the
+  // secret byte-by-byte. The plain `!==` short-circuits on the first mismatch.
+  if (!token || !timingSafeStringEqual(token, config.HMDB_API_SECRET)) {
     return reply.code(401).send({ error: "unauthorized" });
   }
 }

@@ -746,7 +746,13 @@ async function doAuth(e){e.preventDefault();const b=document.getElementById("aut
  const email=document.getElementById("email").value.trim(),password=document.getElementById("pass").value;
  const r=await api(mode==="login"?"/api/login":"/api/signup",{method:"POST",body:JSON.stringify({email,password})});
  if(r.ok&&r.data&&r.data.ok){if(mode==="signup")await api("/api/login",{method:"POST",body:JSON.stringify({email,password})});await boot();}
- else aMsg((r.data&&(r.data.error||r.data.message))||(r.status===401?"بيانات الدخول غير صحيحة":"تعذّر إتمام الطلب"),false);
+ else{
+  var errCode=r.data&&(r.data.error||r.data.message);
+  // Signup on an existing account now returns 409 — guide the user to login
+  // instead of showing a raw error code.
+  if(mode==="signup"&&errCode==="account_already_exists"){aMsg("هذا الحساب موجود مسبقاً — سجّل الدخول بدلاً من ذلك.",false);setMode("login");}
+  else aMsg(errCode||(r.status===401?"بيانات الدخول غير صحيحة":"تعذّر إتمام الطلب"),false);
+ }
  b.disabled=false;return false}
 async function logout(){await api("/api/logout",{method:"POST"});showLanding()}
 
