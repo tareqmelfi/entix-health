@@ -254,7 +254,7 @@ type ProtocolSnapshot = {
   conditions: any[];
   red_lines: any[];
   schedule: Array<{ slot: string; label: string; items: string[]; notes: string }>;
-  interactions: Array<{ code: string; severity: string; title: string; body: string }>;
+  interactions: Array<{ code: string; severity: string; title: string; body: string; title_ar?: string; body_ar?: string }>;
   print_sections: Array<{ title: string; body: string[] }>;
 };
 
@@ -1425,12 +1425,70 @@ function buildProtocolSnapshot(medications: any[], supplements: any[], condition
       notes: "حافظ على جرعة Tadalafil 5mg فقط حسب القاعدة الشخصية."
     }
   ];
-  const interactions = redLines.map((rule) => ({
-    code: rule.code || rule.rule_code,
-    severity: rule.severity,
-    title: rule.title || rule.rule_title,
-    body: rule.body || rule.rule_body
-  }));
+  // Bilingual labels for safety rules — the DB stores titles/bodies in English
+  // only. This map adds an Arabic parallel so the protocol screen can render
+  // both languages (per product requirement: every protocol section bilingual).
+  const RED_LINE_AR: Record<string, { title_ar: string; body_ar: string }> = {
+    R1: {
+      title_ar: "حظر قطعي على الأشواغاندا",
+      body_ar:
+        "يُمنع منعاً باتاً اقتراح أو الموافقة أو التلميح باستخدام الأشواغاندا (Withania somnifera) بأي صورة. مُضاد استطباب مع قصور الغدة الدرقية وتناول ليفوثيروكسين. الخطر: فرط نشاط الغدة، كبت TSH، وعاصفة درقية. خلطات الأدابتوجين الحاوية على الأشواغاندا ممنوعة أيضاً."
+    },
+    R2: {
+      title_ar: "حظر قطعي على جرعات عالية من مثبطات PDE5",
+      body_ar:
+        "يُمنع تادالافيل/سيلدينافيل فوق جرعة 5mg يومياً استعادية. تُدافع عن سقف 5mg بلا استثناء. مع ويلبيوترين 300mg: تسرّع قلبي شديد، ارتفاع ضغط، تتالي الصداع النصفي، وانخفاض عتبة النوبة. يُرفض طلب «مرة واحدة 20mg». يُرفض التكديس مع موسّعات وعائية إضافية (سيترولين بجرعة عالية، خلاصة الشوندر، أغماتين). النترات بأي شكل: ممنوعة تماماً."
+    },
+    R3: {
+      title_ar: "قاعدة امتصاص الغدة الدرقية (مباعدة 4–6 ساعات)",
+      body_ar:
+        "فاصل لا يقل عن 4–6 ساعات بين ليفوثيروكسين وكل من: الكالسيوم، الحديد، المغنيسيوم >200mg، الحليب ومشتقاته، أيزوفلافون الصويا، الوجبات عالية الألياف >15g، حليب النباتات المدعّم بالكالسيوم. القهوة: انتظر 45–60 دقيقة بعد الليفوثيروكسين. يُؤخذ الليفو على معدة فارغة عند الاستيقاظ مع الماء فقط. أي مكمّل جديد يجب تقييم توقيته مقابل الليفو."
+    },
+    R4: {
+      title_ar: "منع التحميل المنبّه مع ويلبيوترين",
+      body_ar:
+        "حظر قطعي مع ويلبيوترين 300mg: L-تيروزين (أي جرعة)، موكونا بروريينز/L-Dopa، يوهيمبين، DMHA، أكواد الكافيين عالية الجرعة قبل التمرين، المنبهات الطبية دون موافقة الطبيب النفسي. ويلبيوترين يحمل الدوبامين/النورإبينفرين أصلاً. التكديس يخفض عتبة النوبة ويُخاطر بأحداث قلبية وعائية."
+    },
+    R5: {
+      title_ar: "منع التشخيص أو استبدال الوصفة",
+      body_ar:
+        "الذكاء الاصطناعي مُدرّب شخصي وليس طبيباً. لا يشخّص. لا يقترح أدوية وصفة. لا يقترح إيقاف/تعديل وصفة طبيب (جرعة، توقيت، براند) دون توقيع الطبيب. يُحيل أي سؤال سريري خارج نطاق التدريب إلى طبيب مختص."
+    },
+    B1: {
+      title_ar: "منع التشخيص",
+      body_ar: "الذكاء الاصطناعي مُدرّب وليس طبيباً. لا يشخّص الحالات. يُحيل إلى طبيب مرخّص للتشخيص."
+    },
+    B2: {
+      title_ar: "منع توصيات أدوية وصفة جديدة",
+      body_ar: "لا يُوصى بأدوية وصفة جديدة إطلاقاً. فقط طبيب مرخّص يملك صلاحية الوصف."
+    },
+    B3: {
+      title_ar: "منع تعديل الوصفة دون طبيب",
+      body_ar: "لا تُعدَّل وصفة الطبيب (جرعة، توقيت، براند، طريقة إعطاء) دون توقيع الطبيب في الجلسة."
+    },
+    B4: {
+      title_ar: "احتياط جرعات المكمّلات",
+      body_ar:
+        "لا توصية بمكمّل فوق 100% من RDA دون سياق صريح (العمر، الوزن، الأدوية الحالية، الحالات). عند الشك، التزم الحد الأدنى من النطاق الآمن."
+    },
+    B5: {
+      title_ar: "محفّزات التصعيد للطوارئ",
+      body_ar:
+        "توجيه فوري للطوارئ عند: ألم صدر، ضيق تنفس شديد، صداع شديد مفاجئ، أعراض عصبية (فقد رؤية، ضعف، ثقل في الكلام)، أفكار انتحارية، حساسية مفرطة شديدة، نزيف غير مضبوط."
+    }
+  };
+  const interactions = redLines.map((rule) => {
+    const code = rule.code || rule.rule_code;
+    const ar = RED_LINE_AR[code] || {};
+    return {
+      code,
+      severity: rule.severity,
+      title: rule.title || rule.rule_title,
+      body: rule.body || rule.rule_body,
+      title_ar: ar.title_ar || "",
+      body_ar: ar.body_ar || ""
+    };
+  });
   return {
     generated_at: new Date().toISOString(),
     medications: activeMedications,
@@ -1449,8 +1507,10 @@ function buildProtocolSnapshot(medications: any[], supplements: any[], condition
         body: activeSupplements.map((item) => `${item.display}${item.reason ? ` — ${item.reason}` : ""}`)
       },
       {
-        title: "قواعد التعارضات",
-        body: interactions.slice(0, 8).map((item) => `${item.code}: ${item.title} — ${item.body}`)
+        title: "قواعد التعارضات · Safety Rules",
+        body: interactions.slice(0, 8).map((item) =>
+          `${item.code}: ${item.title}${item.title_ar ? ` | ${item.title_ar}` : ""} — ${item.body}${item.body_ar ? ` | ${item.body_ar}` : ""}`
+        )
       }
     ]
   };
