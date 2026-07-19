@@ -2670,7 +2670,9 @@ app.post("/api/health-data/reset", { preHandler: requireSession }, async (reques
   const session = currentSession(request);
   const email = (session?.email || "").toLowerCase();
   if (!adminEmails.has(email)) return reply.code(403).send({ ok: false, error: "forbidden" });
-  return withPerson(session?.slug || config.HMDB_DEFAULT_PERSON_SLUG, async (client, person) => {
+  const targetSlug = resolvePersonSlug(session);
+  app.log.warn({ actor: email, target: targetSlug, action: "health_data_reset" }, "AUDIT: destructive reset started");
+  return withPerson(targetSlug, async (client, person) => {
     const deleted: Record<string, number> = {};
     const r1 = await client.query("delete from report_snapshots where person_id = $1", [person.id]);
     deleted.report_snapshots = r1.rowCount || 0;
@@ -2678,6 +2680,7 @@ app.post("/api/health-data/reset", { preHandler: requireSession }, async (reques
     deleted.lab_panels = r2.rowCount || 0; // cascades lab_markers
     const r3 = await client.query("delete from documents where person_id = $1", [person.id]);
     deleted.documents = r3.rowCount || 0;
+    app.log.warn({ actor: email, target: targetSlug, action: "health_data_reset", deleted }, "AUDIT: destructive reset completed");
     return { ok: true, reset: true, deleted };
   });
 });
@@ -2699,12 +2702,18 @@ async function loadPersonImages(
       [documentIds, person.id]
     );
     const out: Array<{ b64: string; media: string }> = [];
+    const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB per image — guard against OOM in the model
     for (const row of r.rows) {
       const mime = String(row.mimetype || "").toLowerCase();
       // Only inline genuine image types. PDFs/word/text are handled by the
       // extraction pipeline, not by the chat vision path.
       if (!mime.startsWith("image/")) continue;
       try {
+        const stat = await fs.promises.stat(row.file_path);
+        if (stat.size > MAX_IMAGE_BYTES) {
+          app.log.warn({ size: stat.size, path: row.file_path }, "chat_attachment_oversize_skip");
+          continue;
+        }
         const buf = await fs.promises.readFile(row.file_path);
         out.push({ b64: buf.toString("base64"), media: mime });
         if (out.length >= 6) break;
@@ -2716,7 +2725,12 @@ async function loadPersonImages(
   }).catch(() => [] as Array<{ b64: string; media: string }>);
 }
 
-app.post("/api/chat", { preHandler: requireSession }, async (request, reply) => {
+app.post("/api/chat", {
+  preHandler: requireSession,
+  // Protect the expensive council pipeline from abuse — 20 messages per minute
+  // per user is plenty for a real conversation but blocks scripted flooding.
+  config: { rateLimit: { max: 20, timeWindow: "1 minute" } }
+}, async (request, reply) => {
   const body = z
     .object({
       question: z.string().trim().min(1).max(4000),

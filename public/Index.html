@@ -74,12 +74,103 @@ body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-
 .rxwhy-l{font-weight:800;color:var(--violet);display:block;margin-bottom:3px;font-size:11.5px}
 .rxwhy-empty{color:var(--muted)}
 @media print{
- body{background:#fff}
- .rail,.composer,.printbtn,.dbpill,.cside,.chead{display:none!important}
- .app{display:block}.main{max-width:100%;padding:0}
- .screen{display:none!important}#protocol{display:block!important}
- .bigcard,.cardp,.rxcard,.dark,.labt{box-shadow:none!important;break-inside:avoid}
- .dark{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+ body{background:#fff;font-size:11pt;line-height:1.55}
+ /* hide all app chrome */
+ .rail,.composer,.printbtn,.dbpill,.cside,.chead,.toasts,#rinp,.hidden,.ptoggle,.adh,.cz-panel,.cz-btn,.ctbl-wrap~*{display:none!important}
+ .app{display:block}.main{max-width:100%;padding:0;margin:0}
+ .screen{display:none!important}
+ /* Each printable screen defines its own page breaks */
+ #protocol{display:block!important}
+ #reports{display:block!important}
+
+ /* ===== Page setup: A4, margins, running header/footer ===== */
+ @page{size:A4;margin:18mm 16mm 22mm 16mm}
+ @page:first{margin:0}
+
+ /* ===== Cover page ===== */
+ .print-cover{display:none}
+ body.is-printing .print-cover{display:flex!important;flex-direction:column;justify-content:space-between;min-height:297mm;padding:0;margin:0;page-break-after:always;background:linear-gradient(160deg,#0a0f28 0%,#10173a 55%,#1a1f4a 100%);color:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+ body.is-printing .print-cover .cv-top{padding:28mm 22mm 0}
+ body.is-printing .print-cover .cv-mark{font-size:11pt;letter-spacing:4px;text-transform:uppercase;color:#7fd0ff;font-weight:800}
+ body.is-printing .print-cover .cv-logo{font-size:42pt;font-weight:900;letter-spacing:-1px;margin:6mm 0 0;background:linear-gradient(120deg,#fff,#a9b4dd);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+ body.is-printing .print-cover .cv-sub{font-size:14pt;color:#aebadf;margin-top:3mm;font-weight:600}
+ body.is-printing .print-cover .cv-mid{padding:0 22mm}
+ body.is-printing .print-cover .cv-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:14mm 12mm;margin-top:8mm}
+ body.is-printing .print-cover .cv-label{font-size:9pt;letter-spacing:2px;text-transform:uppercase;color:#7fd0ff;font-weight:800;margin-bottom:2mm}
+ body.is-printing .print-cover .cv-title{font-size:24pt;font-weight:800;color:#fff;margin:0 0 4mm;letter-spacing:-.3px}
+ body.is-printing .print-cover .cv-grid{display:grid;grid-template-columns:1fr 1fr;gap:6mm;margin-top:6mm}
+ body.is-printing .print-cover .cv-field{font-size:10pt}
+ body.is-printing .print-cover .cv-field .l{font-size:8.5pt;color:#7e8bb3;text-transform:uppercase;letter-spacing:1px;margin-bottom:1mm}
+ body.is-printing .print-cover .cv-field .v{font-size:11.5pt;color:#fff;font-weight:700}
+ body.is-printing .print-cover .cv-bottom{padding:0 22mm 22mm;font-size:9pt;color:#7e8bb3;text-align:center}
+ body.is-printing .print-cover .cv-bottom .cv-bar{height:3px;background:linear-gradient(90deg,#7c3aed,#06b6d4);border-radius:2px;margin-bottom:6mm}
+
+ /* ===== Running header on every page after cover ===== */
+ body.is-printing .print-runhead{display:none;position:fixed;top:6mm;left:16mm;right:16mm;flex-direction:row;justify-content:space-between;align-items:center;font-size:8.5pt;color:#94a3b8;border-bottom:1px solid #e2e8f0;padding-bottom:3mm}
+ body.is-printing .print-runhead .rh-logo{font-weight:900;color:#1e293b;letter-spacing:-.3px}
+ body.is-printing .print-runhead .rh-logo span{color:#7c3aed}
+ body.is-printing .print-runhead .rh-meta{color:#64748b;font-weight:600}
+
+ /* ===== Running footer with page number ===== */
+ body.is-printing .print-runfoot{display:none;position:fixed;bottom:8mm;left:16mm;right:16mm;flex-direction:row;justify-content:space-between;align-items:center;font-size:8pt;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:3mm}
+ body.is-printing .print-runfoot .rf-page::after{content:counter(page)}
+ body.is-printing .print-runfoot .rf-brand{font-weight:700;color:#64748b}
+
+ /* ===== Section heading ===== */
+ .psec{display:flex;align-items:center;gap:10px;margin:0 0 8mm;padding-bottom:4mm;border-bottom:2px solid #1e293b;page-break-after:avoid}
+ .psec .psec-ico{width:30px;height:30px;border-radius:9px;background:#10173a;color:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+ .psec .psec-ico .ico{width:17px;height:17px}
+ .psec .psec-kicker{font-size:8.5pt;letter-spacing:2px;text-transform:uppercase;color:#7c3aed;font-weight:800}
+ .psec h2{font-size:18pt;font-weight:800;color:#0f172a;margin:1mm 0 0;letter-spacing:-.3px}
+ .psec .psec-sub{font-size:9.5pt;color:#64748b;margin-top:1mm}
+
+ /* ===== Print-only tables ===== */
+ .ptbl{width:100%;border-collapse:collapse;font-size:9.5pt;margin:0 0 6mm;page-break-inside:auto}
+ .ptbl thead{display:table-header-group}
+ .ptbl th{background:#0f172a!important;color:#fff!important;font-size:8.5pt;font-weight:700;text-align:start;padding:8px 10px;border:1px solid #1e293b;letter-spacing:.3px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+ .ptbl td{padding:7px 10px;border:1px solid #cbd5e1;font-size:9.5pt;color:#1e293b;vertical-align:top;line-height:1.5}
+ .ptbl tbody tr{page-break-inside:avoid}
+ .ptbl tbody tr:nth-child(even){background:#f8fafc}
+ .ptbl .flag-norm{color:#15803d;font-weight:700}
+ .ptbl .flag-watch{color:#b45309;font-weight:700}
+ .ptbl .flag-alert{color:#b91c1c;font-weight:700}
+
+ /* ===== Print protocol cards as clean bordered cards ===== */
+ .cardp,.rxcard{box-shadow:none!important;break-inside:avoid;border:1px solid #cbd5e1;border-radius:10px;padding:12px 14px;margin-bottom:6mm;background:#fff!important}
+ .pcard{break-inside:avoid;box-shadow:none!important;border:1px solid #cbd5e1;border-radius:10px}
+ .pcard .pc-brand,.rxbrand{background:#f1f5f9!important;border-color:#cbd5e1!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+ .pcard .pc-cat.med{background:#ede9fe!important;color:#6d28d9;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+ .pcard .pc-cat.supp{background:#cffafe!important;color:#0e7490;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+
+ /* ===== Dark safety section: force background print ===== */
+ .dark{-webkit-print-color-adjust:exact;print-color-adjust:exact;background:#0a0f28!important;color:#e4e9ff!important;break-inside:avoid;box-shadow:none!important}
+ .dark .dalert{background:rgba(255,255,255,.06)!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+ .dark h2,.dark h4{color:#fff!important}
+ .dark .d-code{background:rgba(239,77,99,.25)!important;color:#ff8497!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+
+ /* ===== Score gauge — force colors ===== */
+ .rep-gauge .g-n{fill:#0f172a;font-weight:900;font-size:30px}
+ .rep-gauge .g-u{fill:#64748b;font-size:11px}
+ .rep-grade{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+
+ /* ===== Closing page ===== */
+ .print-closing{display:none}
+ body.is-printing .print-closing{display:block!important;page-break-before:always;min-height:200mm;padding-top:30mm;text-align:center}
+ body.is-printing .print-closing .cl-bar{height:3px;background:linear-gradient(90deg,#7c3aed,#06b6d4);border-radius:2px;width:60mm;margin:0 auto 12mm}
+ body.is-printing .print-closing .cl-mark{font-size:10pt;letter-spacing:4px;text-transform:uppercase;color:#7c3aed;font-weight:800}
+ body.is-printing .print-closing h2{font-size:22pt;font-weight:800;color:#0f172a;margin:6mm 0 8mm;letter-spacing:-.3px}
+ body.is-printing .print-closing .cl-body{font-size:11pt;color:#334155;line-height:1.9;max-width:140mm;margin:0 auto;text-align:start}
+ body.is-printing .print-closing .cl-box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:10mm 12mm;margin:10mm auto;max-width:140mm}
+ body.is-printing .print-closing .cl-box h3{font-size:12pt;color:#0f172a;margin:0 0 4mm}
+ body.is-printing .print-closing .cl-box p{font-size:10pt;color:#475569;margin:0 0 3mm;line-height:1.8}
+ body.is-printing .print-closing .cl-sig{margin-top:14mm;font-size:10pt;color:#64748b}
+ body.is-printing .print-closing .cl-sig b{color:#0f172a;font-size:11pt}
+
+ /* Force screen content colors to print correctly */
+ .pill,.badge,.rxstat,.rxdose,.rxtime,.pc-cat,.pchip,.rep-grade{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+ .bigcard,.labt{box-shadow:none!important;break-inside:avoid}
+ .labt{border:1px solid #cbd5e1;border-radius:10px}
+ .rep-foot{border-top:2px solid #0f172a;margin-top:10mm;padding-top:4mm;font-size:9pt;color:#64748b;text-align:center}
 }
 .dark{background:linear-gradient(150deg,#10173a,#0a0f28);color:#e4e9ff;border-radius:var(--r);padding:32px;margin-bottom:26px;box-shadow:0 22px 60px rgba(10,15,40,.22)}
 .dhead{display:flex;align-items:center;gap:14px;margin-bottom:18px}.dhead .ib{width:48px;height:48px;border-radius:15px;background:linear-gradient(135deg,var(--violet),#5a4bf0);display:flex;align-items:center;justify-content:center;color:#fff}.dhead .ib .ico{width:24px;height:24px}.dhead .ke{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--cyan);font-weight:800}.dhead h2{margin:3px 0 0;font-size:25px;font-weight:800;color:#fff;letter-spacing:-.4px}
@@ -413,6 +504,10 @@ body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-
 <symbol id="i-google" viewBox="0 0 24 24" fill="none"><path fill="#4285F4" d="M21.6 12.2c0-.7-.06-1.2-.18-1.8H12v3.3h5.5c-.1.9-.7 2.2-1.9 3.1l2.8 2.2c1.6-1.5 2.7-3.8 2.7-6.8z"/><path fill="#34A853" d="M12 22c2.5 0 4.6-.8 6.2-2.2l-3-2.3c-.8.5-1.9.9-3.2.9-2.4 0-4.5-1.6-5.2-3.9l-3.1 2.4A10 10 0 0 0 12 22z"/><path fill="#FBBC05" d="M6.8 14.5a6 6 0 0 1 0-3.8L3.7 8.3a10 10 0 0 0 0 7.4z"/><path fill="#EA4335" d="M12 6.8c1.7 0 2.9.7 3.5 1.3l2.6-2.5C16.6 4.1 14.5 3.2 12 3.2A10 10 0 0 0 3.7 8.3l3.1 2.4C7.5 8.4 9.6 6.8 12 6.8z"/></symbol>
 <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M14 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
 </defs></svg>
+
+<!-- Print-only scaffolding: cover, running header/footer, closing page.
+     Hidden on screen, populated by buildPrintScaffold() before window.print(). -->
+<div id="printScaffold" aria-hidden="true" style="display:none"></div>
 
 <!-- LANDING -->
 <div id="splash" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#f8fafc;z-index:9999"><div style="font-family:'Plus Jakarta Sans',sans-serif;font-weight:800;font-size:24px;letter-spacing:.01em"><span style="color:#1e3a8a">ENTIX</span><span style="color:#2563eb">·HEALTH</span></div></div>
@@ -932,7 +1027,75 @@ window.addEventListener("DOMContentLoaded",()=>{const box=document.getElementByI
 /* REPORTS */
 function scoreFrom(sigs){var meas=sigs.filter(function(s){return s.flag||s.status});var tot=meas.length;if(!tot)return{score:null,grade:"—",norm:0,watch:0,alert:0,tot:0};var alert=0,watch=0,norm=0;meas.forEach(function(s){var f=((s.flag||s.status)||"").toLowerCase();if(f==="critical"){alert++}else if(f==="high"||f==="low"||f==="abnormal"||f==="out_of_range"){watch++}else{norm++}});var raw=(norm*1.0+watch*0.55+alert*0.15)/tot;var score=Math.round(Math.max(0.35,Math.min(0.99,raw))*100);var grade=score>=85?"A":score>=70?"B":score>=55?"C":"D";return{score:score,grade:grade,norm:norm,watch:watch,alert:alert,tot:tot};}
 function gaugeSVG(score){if(score==null)return"";var c=2*Math.PI*52;var off=c*(1-score/100);return '<svg viewBox="0 0 120 120" width="118" height="118"><circle cx="60" cy="60" r="52" fill="none" stroke="#1e293b" stroke-width="11"/><circle cx="60" cy="60" r="52" fill="none" stroke="#2563eb" stroke-width="11" stroke-linecap="round" stroke-dasharray="'+c.toFixed(1)+'" stroke-dashoffset="'+off.toFixed(1)+'" transform="rotate(-90 60 60)"/><text x="60" y="56" text-anchor="middle" class="g-n">'+score+'</text><text x="60" y="74" text-anchor="middle" class="g-u">من 100</text></svg>';}
-function printReport(){window.print();}
+// ===== Professional print system =====
+// Builds a cover page, running header/footer (with page numbers), and a closing
+// page around the current screen content, then triggers the browser print
+// dialog. The "is-printing" class on <body> activates print-only CSS.
+function buildPrintScaffold(kind){
+  const sc=document.getElementById("printScaffold");
+  if(!sc)return;
+  // kind: "report" | "protocol"
+  const title=kind==="protocol"?"البروتوكول العلاجي الشخصي":"التقرير الطبي الشامل";
+  const titleEn=kind==="protocol"?"Personal Treatment Protocol":"Comprehensive Medical Report";
+  const today=new Date();
+  const dStr=today.toLocaleDateString("ar-SA-u-ca-gregory",{year:"numeric",month:"long",day:"numeric"});
+  const uData=STATE.user||{};
+  const user=uData.email||(uData.user&&uData.user.email)||STATE.email||"مستخدم Entix Health";
+  const slug=uData.person_slug||(uData.user&&uData.user.person_slug)||STATE.slug||"";
+  const uid=slug.slice(0,12).toUpperCase()||"ENTIX-USER";
+  sc.innerHTML=
+   '<div class="print-cover">'+
+     '<div class="cv-top">'+
+       '<div class="cv-mark">Entix Health · Vita</div>'+
+       '<div class="cv-logo">ENTIX·HEALTH</div>'+
+       '<div class="cv-sub">توجيه صحي شخصي · Personal Health Guidance</div>'+
+     '</div>'+
+     '<div class="cv-mid">'+
+       '<div class="cv-card">'+
+         '<div class="cv-label">'+titleEn+'</div>'+
+         '<h1 class="cv-title">'+title+'</h1>'+
+         '<div class="cv-grid">'+
+           '<div class="cv-field"><div class="l">المستخدم · User</div><div class="v">'+esc(user)+'</div></div>'+
+           '<div class="cv-field"><div class="l">المعرّف · ID</div><div class="v">'+esc(uid)+'</div></div>'+
+           '<div class="cv-field"><div class="l">التاريخ · Date</div><div class="v">'+esc(dStr)+'</div></div>'+
+           '<div class="cv-field"><div class="l">النوع · Type</div><div class="v">'+titleEn+'</div></div>'+
+         '</div>'+
+       '</div>'+
+     '</div>'+
+     '<div class="cv-bottom"><div class="cv-bar"></div>© '+today.getFullYear()+' Entix Health · صُمّم ويُدار بواسطة ENSIDEX · توجيه تنظيمي شخصي — ليس بديلاً عن الطبيب المعالج</div>'+
+   '</div>'+
+   '<div class="print-runhead"><div class="rh-logo">ENTIX<span>·</span>HEALTH</div><div class="rh-meta">'+esc(titleEn)+' · '+esc(dStr)+'</div></div>'+
+   '<div class="print-runfoot"><div class="rf-brand">Entix Health · Vita</div><div>صفحة <span class="rf-page"></span></div></div>'+
+   '<div class="print-closing">'+
+     '<div class="cl-bar"></div>'+
+     '<div class="cl-mark">Entix Health · Closing</div>'+
+     '<h2>إخلاء المسؤولية والمراجع</h2>'+
+     '<div class="cl-body">'+
+       '<div class="cl-box">'+
+         '<h3>إخلاء المسؤولية الطبية · Medical Disclaimer</h3>'+
+         '<p>هذا التقرير/البروتوكول مُولَّد آلياً بواسطة نظام Entix Health الصحي وهو مُوجَّه تنظيمياً شخصياً فقط. لا يُعدّى تشخيصاً طبياً ولا بديلاً عن استشارة الطبيب المعالج المختص.</p>'+
+         '<p>القرارات النهائية بشأن الأدوية والجرعات والتعارضات يجب أن يتخذها طبيب مرخّص بعد الفحص السريري المباشر. لا توقف أو تعدّل أي وصفة طبية بناءً على هذا التقرير دون موافقة طبيبك.</p>'+
+         '<p>This report is AI-generated personal regulatory guidance — not a medical diagnosis or a substitute for a licensed physician. Final medication and dosing decisions must be made by your treating doctor after clinical examination.</p>'+
+       '</div>'+
+       '<div class="cl-sig">صُمّم ويُدار بواسطة <b>ENSIDEX</b><br>© '+today.getFullYear()+' Entix Health · Vita · جميع الحقوق محفوظة</div>'+
+     '</div>'+
+   '</div>';
+}
+function printReport(){printScreen("report");}
+function printProtocol(){printScreen("protocol");}
+function printScreen(kind){
+  buildPrintScaffold(kind);
+  document.body.classList.add("is-printing");
+  // Defer to next frame so the browser applies the class + layout before printing
+  requestAnimationFrame(function(){requestAnimationFrame(function(){
+    window.print();
+    // Cleanup after print dialog closes
+    setTimeout(function(){
+      document.body.classList.remove("is-printing");
+      const sc=document.getElementById("printScaffold");if(sc)sc.innerHTML="";
+    },300);
+  })});
+}
 async function resetMyData(){if(!confirm("سيتم حذف كل التحاليل والمؤشرات المرفوعة لتبدأ من جديد نظيف. هل تريد المتابعة؟"))return;var r=await api("/api/health-data/reset",{method:"POST"});if(r&&r.ok){alert("تم تصفير بياناتك بنجاح. ارفع تحاليلك من جديد.");loadReports()}else{alert("تعذّر التصفير — تأكد أنك مسجّل بحساب المشرف (بريدك).")}}
 async function loadReports(){const v=document.getElementById("reports");v.innerHTML=skeleton(3);
  const r=await api("/api/dashboard");const d=(r.data)||{};
@@ -953,7 +1116,8 @@ async function loadReports(){const v=document.getElementById("reports");v.innerH
  var snapMeds=(_snap.medications&&_snap.medications.length)?_snap.medications:[];
  var snapSupps=(_snap.supplements&&_snap.supplements.length)?_snap.supplements:[];
  var planMeds=(snapMeds.length||snapSupps.length)?snapMeds.concat(snapSupps).slice(0,6):plan;
- const repCore=meas.length?('<div class="rep-score"><div class="rep-gauge">'+gaugeSVG(sc.score)+'</div><div style="flex:1;min-width:230px"><div style="display:flex;align-items:center;gap:10px"><h2 class="rep-h2">حالتك الصحية</h2>'+(sc.score!=null?'<span class="rep-grade">'+sc.grade+'</span>':"")+'</div><div class="rep-stats"><div class="rep-stat"><div class="n">'+sc.tot+'</div><div class="l">مؤشرات</div></div><div class="rep-stat"><div class="n" style="color:#fbbf24">'+sc.watch+'</div><div class="l">تستدعي انتباه</div></div><div class="rep-stat"><div class="n" style="color:#f87171">'+sc.alert+'</div><div class="l">حرجة</div></div><div class="rep-stat"><div class="n" style="color:#34d399">'+sc.norm+'</div><div class="l">ضمن المعدل</div></div></div></div></div>'+
+ const repCore=meas.length?('<div class="psec"><div class="psec-ico"><svg class="ico"><use href="#i-report"/></svg></div><div><div class="psec-kicker">Medical Report · الفحص الشامل</div><h2>التقرير الطبي الشامل</h2><div class="psec-sub">درجة الحالة الصحية، سجل المؤشرات المشروح، والخطة العلاجية الحالية.</div></div></div>'+
+  '<div class="rep-score"><div class="rep-gauge">'+gaugeSVG(sc.score)+'</div><div style="flex:1;min-width:230px"><div style="display:flex;align-items:center;gap:10px"><h2 class="rep-h2">حالتك الصحية</h2>'+(sc.score!=null?'<span class="rep-grade">'+sc.grade+'</span>':"")+'</div><div class="rep-stats"><div class="rep-stat"><div class="n">'+sc.tot+'</div><div class="l">مؤشرات</div></div><div class="rep-stat"><div class="n" style="color:#fbbf24">'+sc.watch+'</div><div class="l">تستدعي انتباه</div></div><div class="rep-stat"><div class="n" style="color:#f87171">'+sc.alert+'</div><div class="l">حرجة</div></div><div class="rep-stat"><div class="n" style="color:#34d399">'+sc.norm+'</div><div class="l">ضمن المعدل</div></div></div></div></div>'+
    '<div class="labt" style="margin-top:18px"><div class="labt-h2"><h3 class="labt-t2">سجل المؤشرات — مشروح</h3><p class="labt-sub2">كل مؤشر بقيمته وموقعه من المعدل وشرح تأثيره.</p></div>'+modernTable(meas.map(function(s){return {ar:s.label,en:"",val:s.val,num:s.num,unit:s.unit,range:s.range,flag:s.flag,slabel:s.slabel,explain:s.exp,exl:s.exl}}))+'</div>'+
    (planMeds.length?'<div class="bigcard" style="margin-top:18px"><div class="kicker"><svg class="ico"><use href="#i-pill"/></svg> الخطة العلاجية الحالية · Current Treatment Plan</div><div class="rxlist">'+planMeds.map(function(m){var ar=m.name_ar||arName(m.name||"");var en=baseName(m.name)||m.name||"-";var brand=m.brand||brandOf(m.name||"");var head=ar?('<b class="rxname">'+esc(ar)+'</b><span class="rxname-en">'+esc(en)+'</span>'):('<b class="rxname">'+esc(en)+'</b>');return '<div class="rxcard rx-good"><div class="rxtop">'+head+(m.dose?'<span class="rxdose">'+esc(m.dose)+'</span>':"")+(m.timing?'<span class="rxtime">'+esc(m.timing)+'</span>':"")+'</div>'+(brand&&brand!=="—"?'<div class="rxbrand"><span class="rxwhy-l">البراند</span> <b>'+esc(brand)+'</b></div>':"")+((m.reason||m.notes)?'<p class="rxwhy"><span class="rxwhy-l">السبب</span> '+esc(m.reason||m.notes)+'</p>':"")+(m.why_formulation?'<p class="rxwhy"><span class="rxwhy-l">لماذا هذه الصيغة</span> '+esc(m.why_formulation)+'</p>':"")+'</div>'}).join("")+'</div></div>':"")+
    '<div class="rep-foot">© 2026 Entix Health · توجيه تنظيمي شخصي — ليس بديلاً عن الطبيب المعالج. صُمّم ويُدار بواسطة ENSIDEX.</div>'):'<div class="empty">ما فيه مؤشرات بعد — ارفع تحليلك لتوليد التقرير.</div>';
@@ -994,12 +1158,12 @@ async function loadProtocol(){const v=document.getElementById("protocol");v.inne
  function card(it){var ar=it.name_ar||arName(it.name);var brand=it.brand||brandOf(it.name);var en=baseName(it.name)||it.name;var head='<div class="pc-top"><div>'+(ar?'<b class="pc-name">'+esc(ar)+'</b><div class="pc-en">'+esc(en)+'</div>':'<b class="pc-name">'+esc(en)+'</b>')+'</div><span class="pc-cat '+it.catCls+'">'+esc(it.cat)+'</span></div>';var brandrow=brand?'<div class="pc-brand"><span class="pc-l2">البراند المختار</span><b>'+esc(brand)+'</b></div>':"";var meta='<div class="pc-meta"><div><span class="pc-l">الجرعة</span><b>'+esc(it.dose||"—")+'</b></div><div><span class="pc-l">التكرار</span><b>'+esc(it.freq||"—")+'</b></div><div><span class="pc-l">التوقيت</span><b>'+esc(it.timing||"—")+'</b></div></div>';var reason=it.why?'<div class="pc-sec"><span class="pc-seclbl">السبب</span><p>'+esc(it.why)+'</p></div>':"";var whyf=it.why_formulation?'<div class="pc-sec"><span class="pc-seclbl">لماذا هذه الصيغة تحديداً</span><p>'+esc(it.why_formulation)+'</p></div>':"";var al=it.alert?'<div class="pc-alert"><svg class="ico"><use href="#i-alert"/></svg><div><b>يتعارض مع / تنبيه امتصاص</b><p>'+esc(it.alert)+'</p></div></div>':"";return '<div class="pcard pc-'+it.catCls+'">'+head+brandrow+meta+reason+whyf+al+'</div>';}
  function tlItem(it){var d=adh[it.id];var ar=it.name_ar||arName(it.name);var nm=ar?(esc(ar)+' <span class="pc-en-inline">'+esc(it.name)+'</span>'):esc(it.name);return '<div class="ptl-card'+(d?" done":"")+'" onclick="toggleDose(\''+it.id+'\')"><span class="ptl-ck">'+(d?"✓":"")+'</span><div><b>'+nm+'</b><div class="ptl-sub">'+(esc([it.dose,it.timing].filter(Boolean).join(" · "))||esc(it.cat))+'</div></div></div>';}
  const header='<div class="head"><div><p class="eyebrow"><svg class="ico"><use href="#i-pill"/></svg> VITA · PERSONAL TREATMENT PROTOCOL</p><h1 class="h1">بروتوكولات العلاج</h1><div class="subline">متابعة الأدوية، المكمّلات، والأنشطة الصحية المجدولة.</div></div>'+
-  '<div class="phead-r"><div class="adh"><span class="adh-l">معدل الالتزام (اليوم)</span><b class="adh-v">'+pct+'%</b></div><button class="printbtn" onclick="window.print()"><svg class="ico"><use href="#i-report"/></svg> طباعة</button></div></div>'+
+  '<div class="phead-r"><div class="adh"><span class="adh-l">معدل الالتزام (اليوم)</span><b class="adh-v">'+pct+'%</b></div><button class="printbtn" onclick="printProtocol()"><svg class="ico"><use href="#i-report"/></svg> طباعة البروتوكول</button></div></div>'+
   '<div class="ptoggle"><button class="'+(view==="today"?"on":"")+'" onclick="setProtoView(\'today\')">جدول اليوم</button><button class="'+(view==="full"?"on":"")+'" onclick="setProtoView(\'full\')">الخطة الشاملة</button></div>';
  var body;
  if(!items.length){body='<div class="empty">البروتوكول يتكوّن تلقائياً بعد إضافة أدوية/مكملات أو رفع تقارير. اسأل المجلس عن جرعاتك.</div>';}
- else if(view==="today"){body='<div class="ptl">'+slots.map(function(sl){var its=items.filter(function(it){return it.slot===sl.k});if(!its.length)return"";return '<div class="ptl-slot"><div class="ptl-head"><span class="ptl-dot"></span><div><b>'+sl.t+'</b><div class="ptl-hsub">'+sl.sub+'</div></div></div><div class="ptl-list">'+its.map(tlItem).join("")+'</div></div>';}).join("")+'</div>';}
- else{body='<div class="pgrid">'+items.map(card).join("")+'</div>'+((inter.length||reds.length)?'<div class="dark" style="margin-top:18px"><div class="dhead"><div class="ib"><svg class="ico"><use href="#i-shieldcheck"/></svg></div><div><div class="ke">Safety Rules · قواعد السلامة</div><h2>قواعد السلامة والتعارضات</h2></div></div><div class="dalerts">'+(inter.length?inter:reds).map(function(a){var code=a.code||"";var arT=a.title_ar||"";var arB=a.body_ar||"";var enT=a.title||a.message||"";var enB=a.body||a.detail||a.message||"";var headAr=arT||enT;var headEn=arT?(enT||""):"";var bodyAr=arB||enB;var bodyEn=arB?(enB||""):"";return '<div class="dalert"><div class="ex"><svg class="ico"><use href="#i-alert"/></svg></div><div>'+(code?'<span class="d-code">'+esc(code)+'</span>':"")+'<h4>'+esc(headAr)+'</h4><p>'+esc(bodyAr)+'</p>'+((headEn||bodyEn)?'<div class="d-en">'+(headEn?'<b>'+esc(headEn)+'</b>'+(bodyEn?' — ':''):"")+esc(bodyEn||"")+'</div>':"")+'</div></div>'}).join("")+'</div></div>':"");}
+ else if(view==="today"){body='<div class="psec"><div class="psec-ico"><svg class="ico"><use href="#i-pill"/></svg></div><div><div class="psec-kicker">Daily Schedule · جدول اليوم</div><h2>الجدول اليومي للبروتوكول</h2><div class="psec-sub">الأدوية والمكمّلات موزّعة حسب توقيت اليوم (صباح/ظهيرة/مساء).</div></div></div><div class="ptl">'+slots.map(function(sl){var its=items.filter(function(it){return it.slot===sl.k});if(!its.length)return"";return '<div class="ptl-slot"><div class="ptl-head"><span class="ptl-dot"></span><div><b>'+sl.t+'</b><div class="ptl-hsub">'+sl.sub+'</div></div></div><div class="ptl-list">'+its.map(tlItem).join("")+'</div></div>';}).join("")+'</div>';}
+ else{body='<div class="psec"><div class="psec-ico"><svg class="ico"><use href="#i-pill"/></svg></div><div><div class="psec-kicker">Full Treatment Plan · الخطة الشاملة</div><h2>البروتوكول العلاجي الشامل</h2><div class="psec-sub">بطاقات مفصّلة لكل دواء/مكمل مع الجرعة، البراند، السبب، وقواعد السلامة.</div></div></div><div class="pgrid">'+items.map(card).join("")+'</div>'+((inter.length||reds.length)?'<div class="dark" style="margin-top:18px"><div class="dhead"><div class="ib"><svg class="ico"><use href="#i-shieldcheck"/></svg></div><div><div class="ke">Safety Rules · قواعد السلامة</div><h2>قواعد السلامة والتعارضات</h2></div></div><div class="dalerts">'+(inter.length?inter:reds).map(function(a){var code=a.code||"";var arT=a.title_ar||"";var arB=a.body_ar||"";var enT=a.title||a.message||"";var enB=a.body||a.detail||a.message||"";var headAr=arT||enT;var headEn=arT?(enT||""):"";var bodyAr=arB||enB;var bodyEn=arB?(enB||""):"";return '<div class="dalert"><div class="ex"><svg class="ico"><use href="#i-alert"/></svg></div><div>'+(code?'<span class="d-code">'+esc(code)+'</span>':"")+'<h4>'+esc(headAr)+'</h4><p>'+esc(bodyAr)+'</p>'+((headEn||bodyEn)?'<div class="d-en">'+(headEn?'<b>'+esc(headEn)+'</b>'+(bodyEn?' — ':''):"")+esc(bodyEn||"")+'</div>':"")+'</div></div>'}).join("")+'</div></div>':"");}
  v.innerHTML=header+body;
 }
 
