@@ -1040,8 +1040,9 @@ function buildPrintScaffold(kind){
   const today=new Date();
   const dStr=today.toLocaleDateString("ar-SA-u-ca-gregory",{year:"numeric",month:"long",day:"numeric"});
   const uData=STATE.user||{};
-  const user=uData.email||(uData.user&&uData.user.email)||STATE.email||"مستخدم Entix Health";
-  const slug=uData.person_slug||(uData.user&&uData.user.person_slug)||STATE.slug||"";
+  const auth=uData.auth||{};
+  const user=auth.email||uData.email||(uData.user&&uData.user.email)||STATE.email||"مستخدم Entix Health";
+  const slug=uData.person_slug||auth.person_slug||(uData.user&&uData.user.person_slug)||STATE.slug||"";
   const uid=slug.slice(0,12).toUpperCase()||"ENTIX-USER";
   sc.innerHTML=
    '<div class="print-cover">'+
