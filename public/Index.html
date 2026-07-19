@@ -714,19 +714,20 @@ function skeleton(n){let s='<div class="sk sk-line" style="width:38%"></div><div
 function toggleConvs(){const s=document.getElementById("cside");if(s)s.classList.toggle("open")}
 // Unified upload used by chat + reports + onboarding. Returns {saved,duplicates,extractions,pendingIds}.
 async function uploadHealthFiles(files,convId,progressHost){
- let saved=0,dup=0;const extractions=[],pendingIds=[];
+ let saved=0,dup=0;const extractions=[],pendingIds=[],savedDocs=[];
  for(const f of files){
   let prog=null;
   if(progressHost){prog=document.createElement("div");prog.className="upprog";prog.innerHTML='<span class="spin"></span> جارٍ رفع وقراءة: '+esc(f.name.slice(0,36))+"…";progressHost.appendChild(prog);sd()}
   const fd=new FormData();fd.append("file",f);if(convId)fd.append("conversation_id",convId);
   try{const up=await fetch("/api/documents",{method:"POST",credentials:"include",body:fd});const uj=await up.json().catch(()=>null);
    if(uj){dup+=uj.duplicates||0;saved+=uj.saved||0;(uj.results||[]).forEach(rr=>{if(!rr)return;
+    if(rr.document&&rr.document.id)savedDocs.push(rr.document);
     if(rr.extraction&&rr.extraction.markers&&rr.extraction.markers.length)extractions.push(rr.extraction);
     else if(rr.ocr_status==="queued"&&rr.document&&rr.document.id)pendingIds.push(rr.document.id)})}
   }catch{toast("تعذّر رفع "+f.name.slice(0,26),"err")}
   if(prog)prog.remove();
  }
- return{saved,dup,extractions,pendingIds}}
+ return{saved,dup,extractions,pendingIds,savedDocs}}
 // Poll queued OCR docs so the user knows when markers land, then refresh views.
 function pollDocuments(ids){if(!ids||!ids.length)return;let tries=0,ticking=false;
  const iv=setInterval(async()=>{if(ticking)return;ticking=true;tries++;
@@ -902,15 +903,21 @@ async function sendMsg(){if(STATE.busy)return;const t=document.getElementById("c
  const analyze=files.length>0||isDiagnostic(q);
  STATE.busy=true;document.getElementById("csend").disabled=true;t.value="";grow();
  bubble("me",q,null,files);
+ var attachmentIds=[];
  if(files.length){const sc=document.getElementById("cscroll");
   const res=await uploadHealthFiles(files,STATE.convId,sc);
   STATE.files=[];renderFiles();
+  // Collect document IDs so the backend can fetch the images and pass them to
+  // the multimodal model — the AI actually SEES what the user uploaded.
+  (res.savedDocs||[]).forEach(function(d){if(d&&d.id)attachmentIds.push(d.id);});
   res.extractions.forEach(ex=>tableBubble(ex.markers,ex.lab_name||"نتائج التحليل المستخرجة"));
   if(res.dup){const n=document.createElement("div");n.className="upnote";n.innerHTML=`<svg class="ico"><use href="#i-shieldcheck"/></svg> ${res.dup} ملف موجود مسبقاً — استخدمت بياناته بدون تكرار${res.saved?` · أضفت ${res.saved} ملف جديد`:""}.`;sc.appendChild(n);sd();}
   if(res.pendingIds.length){toast("جارٍ قراءة "+res.pendingIds.length+" ملف في الخلفية — سنخبرك عند اكتمال الاستخراج");pollDocuments(res.pendingIds)}}
  if(analyze)delib();else typing();
  STATE.lastQ=q||"حلّل نتائج التحاليل التي رفعتها واشرح كل مؤشر (طبيعي/مرتفع/منخفض) وما المطلوب مني.";
- const r=await api("/api/chat",{method:"POST",body:JSON.stringify({question:STATE.lastQ,conversation_id:STATE.convId,analyze})});
+ const payload={question:STATE.lastQ,conversation_id:STATE.convId,analyze};
+ if(attachmentIds.length)payload.attachment_ids=attachmentIds;
+ const r=await api("/api/chat",{method:"POST",body:JSON.stringify(payload)});
  unDelib();STATE.busy=false;document.getElementById("csend").disabled=false;
  if(r.ok&&r.data){try{localStorage.setItem("entix_asked","1")}catch(e){}
   STATE.convId=r.data.conversation_id||STATE.convId;bubble("ai",r.data.answer||"تعذّر توليد إجابة.",r.data);

@@ -43,6 +43,10 @@ const EnvSchema = z.object({
   COUNCIL_MODEL_CLINICIAN: z.string().default("claude-opus-4-8"),
   COUNCIL_MODEL_AUDITOR: z.string().default("gpt-5.5"),
   COUNCIL_MODEL_RESEARCHER: z.string().default("gemini-3.5-flash"),
+  // Multimodal model for chat messages that carry images (a photo, screenshot,
+  // rash, wound, ECG, etc.). Must support inline image input. Used by runDirect
+  // and runCouncil when input.images is non-empty.
+  COUNCIL_MODEL_VISION: z.string().default("gemini-2.5-flash"),
   COUNCIL_TIMEOUT_MS: z.coerce.number().default(45000),
   // Vision model used to read lab-report images/PDFs into structured markers.
   EXTRACTION_MODEL: z.string().default("claude-opus-4-8"),

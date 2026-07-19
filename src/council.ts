@@ -36,6 +36,10 @@ export type CouncilInput = {
   memoryContext: unknown; // health snapshot (lab trends, meds, conditions)
   redLineHits: CouncilHit[]; // from the deterministic, PHI-aware local validator
   pastMemory?: string; // cross-session recall: summary of older conversations/events
+  // Inline images attached to this chat message (base64 + media type). When
+  // present, the council/direct engine routes to a multimodal model so the AI
+  // actually SEES what the user uploaded (e.g. a photo they want an opinion on).
+  images?: Array<{ b64: string; media: string }>;
 };
 
 const DISCLAIMER_AR =
@@ -146,6 +150,45 @@ async function callGemini(model: string, system: string, user: string, timeoutMs
     (r.json?.candidates?.[0]?.content?.parts || []).map((p: any) => p?.text || "").join("\n")
   ).trim();
   if (!text) throw new Error("gemini_empty");
+  return text;
+}
+
+// Multimodal Gemini call — sends inline images alongside the text prompt so the
+// model can actually SEE what the user attached (a photo, a screenshot, a rash,
+// a wound, an ECG strip, etc.). Used by both the direct chat and the council
+// clinician seat whenever the user's message carries images.
+async function callGeminiVision(
+  model: string,
+  system: string,
+  user: string,
+  images: Array<{ b64: string; media: string }>,
+  timeoutMs: number
+) {
+  if (!config.GEMINI_API_KEY) throw new Error("gemini_key_missing");
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    model
+  )}:generateContent`;
+  const parts: any[] = images.slice(0, 6).map((im) => ({
+    inline_data: { mime_type: im.media, data: im.b64 }
+  }));
+  parts.push({ text: user });
+  const r = await fetchJsonWithTimeout(
+    url,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-goog-api-key": config.GEMINI_API_KEY },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: system }] },
+        contents: [{ role: "user", parts }]
+      })
+    },
+    timeoutMs
+  );
+  if (!r.ok) throw new Error(`gemini_vision_http_${r.status}`);
+  const text = String(
+    (r.json?.candidates?.[0]?.content?.parts || []).map((p: any) => p?.text || "").join("\n")
+  ).trim();
+  if (!text) throw new Error("gemini_vision_empty");
   return text;
 }
 
@@ -454,7 +497,7 @@ export async function runDirect(input: CouncilInput): Promise<CouncilResult> {
   const hardBan = input.redLineHits.some((h) => h.severity === "hard_ban");
   if (hardBan) {
     const answer = [
-      "تم إيقاف هذا المسار حسب قواعد السلامة الشخصية المسجّلة في ملفك:",
+      "تم إيقاف هذا المسار حسب قواعد السلامة الشخصية المسجّنة في ملفك:",
       ...input.redLineHits.map((h) => `- ${h.message}`),
       "الخطوة الآمنة: لا تبدأ أو ترفع الجرعة، واطلب بديلاً أقل خطورة بعد مراجعة طبيبك.",
       "",
@@ -470,33 +513,60 @@ export async function runDirect(input: CouncilInput): Promise<CouncilResult> {
   }
   const caution = input.redLineHits.length > 0;
   const memCtx = memorySummary(input.memoryContext);
+  const hasImages = Array.isArray(input.images) && input.images.length > 0;
   const system = [
     "أنت مساعد Entix Health الصحي الشخصي — محادثة مباشرة ودّية ومهنية بالعربية بلهجة سعودية واضحة.",
     "أجب باختصار وعملية. اربط بمؤشرات ملف المستخدم عند الصلة. لا تعطِ تشخيصاً قاطعاً.",
     "إذا احتاج السؤال تحليلاً تشخيصياً عميقاً أو مراجعة تحاليل، اقترح عليه تحويله إلى «مجلس الأطباء» لتحليل أعمق بمصادر وثقة.",
+    // CRITICAL anti-hallucination rules — the prior system prompt let the model
+    // drift into generic lab-analysis answers even when the user asked about a
+    // totally unrelated image. These rules force it to answer the ACTUAL question.
+    "قواعد صارمة للإجابة:",
+    "1) أجب عن سؤال المستخدم الفعلي بالضبط كما طرحه — لا تستبدله بسؤال آخر تظن أنه أقرب.",
+    "2) إذا أرفق المستخدم صورة، انظر إلى الصورة فعلياً وأجب عمّا يراه فيها. لا تتجاهلها ولا تتصرف كأنها تحاليل مخزّنة.",
+    "3) إذا لم تكن مؤشرات الملف الطبي مرتبطة بالسؤال، لا تذكرها. لا تبدأ بسرد التحاليل أو الأدوية ما لم يسأل المستخدم عنها.",
+    "4) إذا لم تعرف الإجابة أو لم تتوفر بيانات كافية، قل صراحةً «لا أعرف» أو «أحتاج مزيد معلومات» بدل اختراع رد.",
+    "5) ميّز بوضوح بين ما تراه في الصورة المرفقة وما تعرفه من ملف المستخدم المخزّن.",
     caution ? `تنبيهات سلامة يجب دمجها: ${input.redLineHits.map((h) => h.message).join(" | ")}` : ""
   ].filter(Boolean).join("\n");
   const user = [
     `رسالة المستخدم: ${input.userMessage}`, "",
-    `سياق ملفه الطبي:\n${memCtx}`, "",
+    hasImages ? `(أرفق المستخدم ${input.images!.length} صورة — انظر إليها وأجب عنها تحديداً.)` : "",
+    `سياق ملفه الطبي (استخدمه فقط عند الصلة المباشرة بالسؤال):\n${memCtx}`, "",
     input.pastMemory ? `ذاكرة سابقة عابرة للجلسات:\n${input.pastMemory}` : ""
   ].filter(Boolean).join("\n");
   let answer = "";
   let model = config.COUNCIL_MODEL_CLINICIAN;
   const memberStatus: CouncilResult["member_status"] = {};
-  try {
-    answer = await callAnthropic(config.COUNCIL_MODEL_CLINICIAN, system, user, timeoutMs);
-    memberStatus.assistant = { ok: true, model };
-  } catch {
+  // When the user attached images, route to a multimodal model that can SEE them.
+  // Gemini Flash Vision is fast and accurate for general image Q&A. We prefer it
+  // first for image-bearing messages; the text-only Claude/GPT path stays for
+  // plain text questions (it's better at long-form clinical reasoning).
+  if (hasImages) {
     try {
-      answer = await callOpenAI(config.COUNCIL_MODEL_AUDITOR, system, user, timeoutMs);
-      model = config.COUNCIL_MODEL_AUDITOR; memberStatus.assistant = { ok: true, model, note: "fallback" };
+      answer = await callGeminiVision(config.COUNCIL_MODEL_VISION, system, user, input.images!, timeoutMs);
+      model = config.COUNCIL_MODEL_VISION;
+      memberStatus.assistant = { ok: true, model, note: "multimodal" };
+    } catch (e1) {
+      memberStatus.assistant = { ok: false, model, note: String(e1).slice(0, 80) };
+    }
+  }
+  if (!answer) {
+    try {
+      answer = await callAnthropic(config.COUNCIL_MODEL_CLINICIAN, system, user, timeoutMs);
+      model = config.COUNCIL_MODEL_CLINICIAN;
+      memberStatus.assistant = { ok: true, model };
     } catch {
       try {
-        answer = await callGemini(config.COUNCIL_MODEL_RESEARCHER, system, user, timeoutMs);
-        model = config.COUNCIL_MODEL_RESEARCHER; memberStatus.assistant = { ok: true, model, note: "fallback2" };
-      } catch (e3) {
-        memberStatus.assistant = { ok: false, model, note: String(e3).slice(0, 80) };
+        answer = await callOpenAI(config.COUNCIL_MODEL_AUDITOR, system, user, timeoutMs);
+        model = config.COUNCIL_MODEL_AUDITOR; memberStatus.assistant = { ok: true, model, note: "fallback" };
+      } catch {
+        try {
+          answer = await callGemini(config.COUNCIL_MODEL_RESEARCHER, system, user, timeoutMs);
+          model = config.COUNCIL_MODEL_RESEARCHER; memberStatus.assistant = { ok: true, model, note: "fallback2" };
+        } catch (e3) {
+          memberStatus.assistant = { ok: false, model, note: String(e3).slice(0, 80) };
+        }
       }
     }
   }
@@ -516,7 +586,7 @@ export async function runDirect(input: CouncilInput): Promise<CouncilResult> {
     ok: true, request_id: requestId, final_answer: finalAnswer,
     validator_status: { status: caution ? "caution" : "pass", blocked: false, hits: input.redLineHits },
     models_used: [`direct:${model}`], confidence: -1, sources: [], member_status: memberStatus,
-    memory_delta: { request_id: requestId, direct: true }
+    memory_delta: { request_id: requestId, direct: true, multimodal: hasImages }
   };
 }
 

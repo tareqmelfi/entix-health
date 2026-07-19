@@ -53,6 +53,49 @@ function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }
 
+// Derive a unique, stable person slug from an email. Format: "u-<localpart>-<hash>"
+// where localpart is the part before @ (sanitised) and hash is a short sha of the
+// full email to guarantee uniqueness across users that share a local-part.
+// CRITICAL: every signed-up user must own an ISOLATED person record — never reuse
+// another user's profile, otherwise they'd see someone else's labs/meds/protocol.
+function slugFromEmail(email: string): string {
+  const normalized = normalizeEmail(email);
+  const localPart = normalized.split("@")[0].replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 18) || "user";
+  const hash = crypto.createHash("sha1").update(normalized).digest("hex").slice(0, 8);
+  return `u-${localPart}-${hash}`;
+}
+
+// Create an isolated person record for a new user. Idempotent: if the slug already
+// exists (e.g. user re-signs up), just returns it. Never assigns anyone to "tareq".
+async function ensurePersonForUser(email: string, displayLabel?: string): Promise<string> {
+  const slug = slugFromEmail(email);
+  await pool
+    .query(
+      `insert into health_memory.persons (slug, display_label, relation_label, privacy_level, status, consent_recorded, metadata)
+       values ($1, $2, 'self', 'private', 'active', false, '{"source":"user-signup","auto_created":true}'::jsonb)
+       on conflict (slug) do update
+       set status = 'active', updated_at = now()
+       returning slug`,
+      [slug, displayLabel || email.split("@")[0]]
+    )
+    .catch((error: unknown) => app.log.warn({ err: error }, "person_seed_skipped"));
+  return slug;
+}
+
+// Resolve the effective person slug for the current session. CRITICAL safety net:
+// the legacy default "tareq" must NEVER leak to a non-admin user — otherwise they
+// would see Tareq's labs, medications, and protocol. If a session somehow still
+// carries slug="tareq" but the email isn't an admin, we derive the correct isolated
+// slug from the email instead.
+function resolvePersonSlug(session: { slug?: string; email?: string } | undefined): string {
+  if (!session) return config.HMDB_DEFAULT_PERSON_SLUG;
+  const slug = session.slug || slugFromEmail(session.email || "") || config.HMDB_DEFAULT_PERSON_SLUG;
+  if (slug === "tareq" && session.email && !adminEmails.has(session.email)) {
+    return slugFromEmail(session.email);
+  }
+  return slug;
+}
+
 const LOCAL_PASSWORD_METADATA_KEY = "local_password";
 
 function publicRedirect(search = "", hash = "") {
@@ -1123,9 +1166,16 @@ async function findAppUserByEmail(email: string) {
 
 async function activateOAuthUser(email: string, profile: Record<string, unknown>, source = "google-oauth") {
   const normalized = normalizeEmail(email);
+  // Every user gets their OWN isolated person record — never inherit "tareq".
+  // Only pre-seeded admin accounts (already in app_users with person_slug set)
+  // keep their existing slug; new users get a fresh slug derived from their email.
+  const existing = await findAppUserByEmail(normalized);
+  const personSlug = existing?.person_slug && existing.person_slug !== "tareq"
+    ? existing.person_slug
+    : await ensurePersonForUser(normalized);
   const result = await pool.query(
     `insert into health_memory.app_users (email, person_slug, role, status, created_by, metadata)
-     values ($1, 'tareq', 'member', 'active', $3, $2::jsonb)
+     values ($1, $2, 'member', 'active', $4, $3::jsonb)
      on conflict (email) do update
      set person_slug = coalesce(app_users.person_slug, excluded.person_slug),
          role = case when app_users.role = 'admin' then app_users.role else excluded.role end,
@@ -1133,7 +1183,7 @@ async function activateOAuthUser(email: string, profile: Record<string, unknown>
          metadata = app_users.metadata || excluded.metadata,
          updated_at = now()
      returning id, email, person_slug, role, status, created_at, updated_at, last_login_at, metadata`,
-    [normalized, JSON.stringify({ ...profile, source }), source]
+    [normalized, personSlug, JSON.stringify({ ...profile, source }), source]
   );
   return result.rows[0];
 }
@@ -1144,6 +1194,8 @@ async function upsertActiveEmailUser(email: string, password: string) {
   if (existing?.status === "active") return { user: existing, alreadyActive: true, suspended: false };
   if (existing?.status === "suspended") return { user: existing, alreadyActive: false, suspended: true };
 
+  // Create an isolated person record for this new user — never fall back to "tareq".
+  const personSlug = await ensurePersonForUser(normalized);
   const metadata = {
     source: "email-password",
     registered_at: new Date().toISOString(),
@@ -1151,7 +1203,7 @@ async function upsertActiveEmailUser(email: string, password: string) {
   };
   const result = await pool.query(
     `insert into health_memory.app_users (email, person_slug, role, status, created_by, metadata)
-     values ($1, 'tareq', 'member', 'active', 'email-signup', $2::jsonb)
+     values ($1, $2, 'member', 'active', 'email-signup', $3::jsonb)
      on conflict (email) do update
      set person_slug = coalesce(app_users.person_slug, excluded.person_slug),
          role = case when app_users.role = 'admin' then app_users.role else excluded.role end,
@@ -1159,7 +1211,7 @@ async function upsertActiveEmailUser(email: string, password: string) {
          metadata = app_users.metadata || excluded.metadata,
          updated_at = now()
      returning id, email, person_slug, role, status, created_at, updated_at, last_login_at, metadata`,
-    [normalized, JSON.stringify(metadata)]
+    [normalized, personSlug, JSON.stringify(metadata)]
   );
   return { user: result.rows[0], alreadyActive: false, suspended: false };
 }
@@ -1876,7 +1928,7 @@ async function handleEmailPasswordLogin(request: FastifyRequest, reply: FastifyR
   if (!hasLocalPassword(user.metadata)) return reply.code(403).send({ error: "local_password_not_set" });
   if (!verifyLocalPassword(body.password, user.metadata)) return reply.code(401).send({ error: "invalid_local_login" });
   await touchUserLogin(user.email);
-  setSession(reply, { slug: user.person_slug || "tareq", email: user.email, role: user.role, status: "active" });
+  setSession(reply, { slug: user.person_slug || slugFromEmail(user.email), email: user.email, role: user.role, status: "active" });
   return { ok: true, person_slug: user.person_slug, email: user.email, role: user.role, status: "active" };
 }
 
@@ -2172,7 +2224,7 @@ app.get("/api/auth/google/callback", async (request, reply) => {
 app.get("/api/bootstrap", { preHandler: requireSession }, async (request) => {
   const db = await checkDb().catch(() => false);
   const session = currentSession(request);
-  const personSlug = session?.slug || config.HMDB_DEFAULT_PERSON_SLUG;
+  const personSlug = resolvePersonSlug(session);
   const person = await getPersonBySlug(personSlug);
   return {
     ok: true,
@@ -2630,16 +2682,65 @@ app.post("/api/health-data/reset", { preHandler: requireSession }, async (reques
   });
 });
 
+// Load up to N image documents belonging to the current person and return them
+// as base64 payloads ready for a multimodal model. Non-image files are skipped.
+// SECURITY: only documents owned by personId are readable — we filter by
+// person_id inside the query so a user can never pull another user's files.
+async function loadPersonImages(
+  personSlug: string,
+  documentIds: string[]
+): Promise<Array<{ b64: string; media: string }>> {
+  if (!documentIds.length) return [];
+  return withPerson(personSlug, async (client, person) => {
+    const r = await client.query(
+      `select id, file_path, metadata->>'mimetype' as mimetype, metadata->>'original_name' as name
+       from documents
+       where id = any($1::uuid[]) and person_id = $2 and file_path is not null`,
+      [documentIds, person.id]
+    );
+    const out: Array<{ b64: string; media: string }> = [];
+    for (const row of r.rows) {
+      const mime = String(row.mimetype || "").toLowerCase();
+      // Only inline genuine image types. PDFs/word/text are handled by the
+      // extraction pipeline, not by the chat vision path.
+      if (!mime.startsWith("image/")) continue;
+      try {
+        const buf = await fs.promises.readFile(row.file_path);
+        out.push({ b64: buf.toString("base64"), media: mime });
+        if (out.length >= 6) break;
+      } catch {
+        // file missing on disk — skip silently
+      }
+    }
+    return out;
+  }).catch(() => [] as Array<{ b64: string; media: string }>);
+}
+
 app.post("/api/chat", { preHandler: requireSession }, async (request, reply) => {
   const body = z
     .object({
       question: z.string().trim().min(1).max(4000),
       session_id: z.string().trim().max(120).optional(),
       conversation_id: z.string().uuid().nullable().optional(),
-      analyze: z.boolean().optional()
+      analyze: z.boolean().optional(),
+      // Document IDs the user just uploaded alongside this chat message. We fetch
+      // their stored image files and pass them inline to the multimodal model so
+      // the AI actually SEES the images (a photo, rash, ECG, etc.) instead of
+      // answering generically from stored lab data.
+      attachment_ids: z.array(z.string().uuid()).max(6).optional()
     })
     .parse(request.body);
-  const result = await runHealthCommittee(request, body.question, body.conversation_id || body.session_id, body.analyze);
+  // Resolve any image attachments to base64 payloads for the council.
+  let images: Array<{ b64: string; media: string }> = [];
+  if (body.attachment_ids && body.attachment_ids.length) {
+    const session = currentSession(request);
+    const personSlug = resolvePersonSlug(session);
+    images = await loadPersonImages(personSlug, body.attachment_ids).catch((error: unknown) => {
+      request.log.warn({ err: error }, "chat_attachment_load_failed");
+      return [];
+    });
+  }
+  const result = await runHealthCommittee(request, body.question, body.conversation_id || body.session_id, body.analyze, images);
   return reply.send(result);
 });
 
@@ -2657,9 +2758,9 @@ function looksLikeWorkflowFailure(payload: any, rawAnswer: string) {
   );
 }
 
-async function runHealthCommittee(request: any, userMessage: string, requestedSessionId?: string, wantsCouncil?: boolean) {
+async function runHealthCommittee(request: any, userMessage: string, requestedSessionId?: string, wantsCouncil?: boolean, images?: Array<{ b64: string; media: string }>) {
   const session = currentSession(request);
-  const personSlug = session?.slug || config.HMDB_DEFAULT_PERSON_SLUG;
+  const personSlug = resolvePersonSlug(session);
   const conversation = await ensureChatSession(personSlug, requestedSessionId, userMessage, session?.email);
   const sessionId = conversation.id;
   // Auto-title: replace placeholder titles with the first real user message.
@@ -2744,7 +2845,8 @@ async function runHealthCommittee(request: any, userMessage: string, requestedSe
       userMessage,
       memoryContext: healthSnapshot,
       redLineHits,
-      pastMemory
+      pastMemory,
+      images
     }).catch((error: unknown) => {
       councilFallbackReason = error instanceof Error ? `council_error: ${error.message.slice(0, 160)}` : "council_error";
       request.log.error({ err: error }, "council_unavailable");
@@ -2979,7 +3081,7 @@ app.post("/api/google-agent/chat", { preHandler: requireSession }, async (reques
     .parse(request.body);
   if (!googleAgentEnabled()) return reply.code(503).send({ ok: false, error: "google_agent_not_configured" });
   const session = currentSession(request);
-  const personSlug = session?.slug || config.HMDB_DEFAULT_PERSON_SLUG;
+  const personSlug = resolvePersonSlug(session);
   const conversation = await ensureChatSession(personSlug, body.conversation_id || undefined, body.question, session?.email);
   await saveChatMessage(personSlug, conversation.id, "user", body.question, { source: "google-agent-ui", email: session?.email || null });
   const healthSnapshot = await buildHealthSnapshot(personSlug).catch(() => null);
@@ -3008,7 +3110,7 @@ app.post("/api/google-agent/chat", { preHandler: requireSession }, async (reques
 
 app.post("/api/documents", { preHandler: requireSession }, async (request, reply) => {
   const session = currentSession(request);
-  const personSlug = session?.slug || config.HMDB_DEFAULT_PERSON_SLUG;
+  const personSlug = resolvePersonSlug(session);
   const personDir = path.join(config.HMDB_FILES_DIR, personSlug);
   await fs.promises.mkdir(personDir, { recursive: true, mode: 0o700 });
 
